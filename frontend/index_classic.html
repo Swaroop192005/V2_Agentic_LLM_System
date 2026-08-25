@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agentic Multi-LLM Validation System</title>
+  <meta name="description" content="Watch multiple local LLMs collaborate to generate, verify, score, and synthesise the best answer — powered by LLaMA 3, Mistral, and agentic orchestration." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
+</head>
+<body>
+
+  <!-- Animated aurora background -->
+  <div class="aurora" aria-hidden="true">
+    <div class="aurora-blob b1"></div>
+    <div class="aurora-blob b2"></div>
+    <div class="aurora-blob b3"></div>
+  </div>
+
+  <div class="app">
+
+    <!-- ── Header ─────────────────────────────────────── -->
+    <header>
+      <div class="logo-row">
+        <div class="logo-icon" aria-hidden="true">🤖</div>
+        <h1>Agentic Multi-LLM<br>Validation System</h1>
+      </div>
+      <p class="tagline">
+        Multiple local AI agents collaborate to generate, fact-check, score,
+        and synthesise the best possible answer — 100% offline, no paid APIs.
+      </p>
+      <div class="badges" role="list" aria-label="Tech stack">
+        <span class="badge" role="listitem">🦙 LLaMA 3</span>
+        <span class="badge" role="listitem">⚡ Mistral</span>
+        <span class="badge" role="listitem">🔗 LangChain</span>
+        <span class="badge" role="listitem">🏠 Ollama</span>
+        <span class="badge" role="listitem">📐 Sentence-Transformers</span>
+        <span class="badge" role="listitem">🚀 FastAPI</span>
+        <span class="badge badge-ctx" role="listitem">🗄️ SQLite Context</span>
+      </div>
+    </header>
+
+    <!-- ── Health bar ─────────────────────────────────── -->
+    <div id="health-bar" role="status" aria-live="polite">
+      <div class="health-dot"></div>
+      <span id="health-msg">Checking Ollama connection…</span>
+    </div>
+
+    <!-- ── Top action bar: Context & RAG buttons ─────────────── -->
+    <div class="top-actions" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button id="context-btn" class="btn-ghost" aria-label="View conversation context">
+        🗄️&nbsp;&nbsp;View Context
+        <span class="ctx-badge" id="ctx-badge" style="display:none">0</span>
+      </button>
+
+      <label id="rag-toggle-label" class="btn-ghost" style="cursor:pointer; display:flex; align-items:center; gap:6px;">
+        <input type="checkbox" id="rag-checkbox" checked style="accent-color:#00ffcc;" />
+        📚&nbsp;&nbsp;RAG Context Mode
+      </label>
+
+      <button id="rag-upload-btn" class="btn-ghost" onclick="document.getElementById('rag-file-input').click()">
+        📎&nbsp;&nbsp;Upload Docs (Optional)
+      </button>
+      <input type="file" id="rag-file-input" style="display:none" accept=".pdf,.txt,.md,.json,.py" multiple onchange="uploadRagDocs(this)" />
+      <span id="rag-status-msg" style="font-size:0.8rem; color:#888;"></span>
+    </div>
+
+    <!-- ── Context panel (slide-down) ─────────────────── -->
+    <div id="context-panel" class="glass ctx-panel" hidden>
+      <div class="ctx-panel-head">
+        <span class="ctx-panel-title">🗄️ Rolling Context — Last 5 Queries</span>
+        <button id="ctx-clear-btn" class="btn-icon-sm" aria-label="Clear conversation context" title="Delete stored query history">🗑️&nbsp;Clear</button>
+        <button id="ctx-close-btn" class="btn-icon-sm" aria-label="Close">✕</button>
+      </div>
+      <div id="ctx-records" class="ctx-records">
+        <p class="ctx-empty">No queries stored yet.</p>
+      </div>
+    </div>
+
+    <!-- ── Query input ─────────────────────────────────── -->
+    <div class="glass query-card" id="query-card">
+      <label for="query-input">YOUR QUESTION</label>
+      <textarea
+        id="query-input"
+        placeholder="e.g. Explain how transformers work in natural language processing…"
+        rows="4"
+        spellcheck="true"
+        aria-label="Enter your question for the AI agents"
+      ></textarea>
+      <div class="form-footer">
+        <span class="char-count" id="char-count" aria-live="polite">0 characters</span>
+        <button id="submit-btn" aria-label="Run the multi-agent validation pipeline">
+          <div class="btn-spinner" aria-hidden="true"></div>
+          <span class="btn-text">🚀 &nbsp;Analyse with AI Agents</span>
+        </button>
+      </div>
+      <p class="form-tip">
+        Tip: Press <kbd>⌘ Enter</kbd> to submit · Pipeline takes ~2–3 min with parallelised agents
+      </p>
+    </div>
+
+    <!-- ── Pipeline progress tracker ──────────────────── -->
+    <div class="glass" id="pipeline-tracker" aria-label="Pipeline progress" role="status">
+      <div class="tracker-title">Agent Pipeline Progress</div>
+      <!-- JS builds the vertical flow inside here -->
+      <div id="tracker-body"></div>
+    </div>
+
+    <!-- ── Timer ──────────────────────────────────────── -->
+    <div id="timer-display" aria-live="polite"></div>
+
+    <!-- ── Post-pipeline: New Question ─────────────────── -->
+    <div id="post-actions" class="post-actions" hidden>
+      <button id="new-question-btn" class="btn-new-question">
+        ✦ &nbsp;Ask New Question
+      </button>
+    </div>
+
+    <!-- ── Results (step-by-step cards) ─────────────────── -->
+    <div id="results-container" role="feed" aria-label="Agent pipeline results"></div>
+
+  </div><!-- /.app -->
+
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>

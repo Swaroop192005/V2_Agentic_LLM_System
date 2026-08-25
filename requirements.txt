@@ -1,0 +1,30 @@
+# ============================================================
+# requirements.txt
+# Agentic Multi-LLM Validation System
+# Compatible with Python 3.12 – 3.14
+# ============================================================
+
+# ── LLM / LangChain ─────────────────────────────────────────
+langchain>=0.3.0            # Core LangChain framework
+langchain-community>=0.3.0  # Community integrations (Ollama LLM wrapper)
+langchain-core>=0.3.0       # Core abstractions (Runnable, etc.)
+langchain-ollama>=0.2.0     # Official LangChain-Ollama integration
+
+# ── Local LLM via Ollama ─────────────────────────────────────
+ollama>=0.2.0               # Python Ollama client (direct API access)
+
+# ── Embedding-based scoring ──────────────────────────────────
+sentence-transformers>=2.7.0   # Semantic similarity (all-MiniLM-L6-v2)
+scikit-learn>=1.4.0            # cosine_similarity utility
+numpy>=1.26.0                  # Array operations
+
+# ── Web server (frontend API) ────────────────────────────────
+fastapi>=0.111.0            # Web framework for the REST/SSE API
+uvicorn[standard]>=0.29.0   # ASGI server to run FastAPI
+sse-starlette>=1.6.5        # Server-Sent Events support for FastAPI
+
+# ── Utilities ────────────────────────────────────────────────
+pydantic>=2.7.0             # Data model validation
+python-dotenv>=1.0.0        # Load .env config (optional)
+rich>=13.0.0                # Beautiful terminal output formatting
+

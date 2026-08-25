@@ -1,0 +1,705 @@
+# Judge/Verifier Redesign — Research Log
+
+Living document tracking the full process of redesigning the evaluation
+(Verifier + Judge) stage of the Agentic Multi-LLM Validation System, for
+research/FYP writeup purposes. Updated as work progresses — see the bottom
+for the most recent entry.
+
+---
+
+## 1. Starting point
+
+Original pipeline: Verifier (phi3, free-form prose fact-check) → Judge
+(qwen2.5, 5-criteria rubric: Factual Accuracy, Completeness, Clarity,
+Relevance, Depth of Reasoning, /50) → winner decision. The Judge read the
+Verifier's prose as unstructured context but never independently verified
+its claims — Judge scores were effectively dependent on trusting phi3's
+narrative at face value.
+
+**Known issue discovered earlier**: the judge/verifier model pairing had
+changed mid-dataset at an earlier point in the project (rows before a
+certain id used an older Mistral-based judge with a ~69% A-win-rate bias;
+rows after switched to phi3+qwen2.5 with ~43% A-win-rate) — training a
+downstream replacement model on the mixed dataset taught it to reconcile
+two disagreeing labeling standards. This directly motivated the decision
+to regenerate a clean, single-regime dataset from scratch (Section 3).
+
+## 2. Verifier/Judge redesign — 8-factor dual independent scoring
+
+**Goal**: reduce the Judge's dependence on the Verifier's unstructured
+opinion, and get a genuine cross-check between two independent models.
+
+**Change**: introduced a shared 8-factor rubric (`agents/rubric.py`), used
+identically by BOTH agents:
+1. Factual Correctness
+2. Question Relevance
+3. Context Relevance (RAG-document alignment, or topical relevance if none)
+4. Faithfulness / Groundedness
+5. Completeness
+6. Hallucination-Free
+7. Clarity
+8. Consistency
+
+(Replaces the old 5-factor judge-only rubric, /50 → /80.)
+
+- **Verifier (phi3)** now independently scores both answers on all 8
+  factors (structured, not prose) — it does NOT declare a winner.
+- **Judge (qwen2.5)** independently scores the same 8 factors AND declares
+  the winner, informed by (but not copying) the Verifier's scores.
+- New parser (`utils/rubric_parser.py`) extracts structured scores from
+  either agent's output with the same logic.
+- New signal: **verifier-judge agreement** — `1 - normalized mean absolute
+  difference` between their two independent totals. Validated live: caught
+  a genuine disagreement case (Verifier scored an answer 76 vs 57 where
+  Judge scored both 76/76 — agreement correctly read 0.88, not 1.0).
+
+## 3. Weighted confidence scoring system
+
+Combines multiple signals into one 0-1 confidence score for the pipeline's
+winning answer, used to gate a regeneration loop (retry ≤2x if below
+threshold).
+
+Signals (weights sum to 1.0, missing signals renormalize):
+- `judge` (0.40) — Judge's rubric total /80
+- `similarity` (0.15) — cosine similarity of winning answer to question
+- `model_agreement` (0.10) — BERTScore between answer_a and answer_b
+  (roberta-large, baseline-rescaled)
+- `verifier_judge_agreement` (0.10) — see Section 2
+- `wikipedia` (0.15) — external fact-check (Wikipedia search + summary API,
+  gated by a relevance check so an unrelated article is never trusted)
+- `wikidata` (0.10) — second, structurally different encyclopedia source
+  added per mentor request (entity search + description, gated the same way)
+
+Threshold calibrated from data (10th percentile of historical weighted
+scores) rather than guessed: **0.68**. `MAX_REGENERATION_ATTEMPTS = 2`.
+
+## 4. Wikidata integration notes
+
+Wikidata's `wbsearchentities` API is a **label matcher** (autocomplete-style
+over entity names), not full-text search like Wikipedia's — searching the
+raw question ("capital of France") matched on literal label words and
+surfaced irrelevant entities. Fixed by extracting candidate proper-noun
+phrases from the **answer** (which names real entities) and falling back to
+the cleaned question, trying each against the label search until one clears
+a relevance gate (cosine sim ≥ 0.35 against the question). Validated: 0.82
+for a correct answer, 0.44 for an incorrect one (found "Germany" from the
+wrong answer's own text), correctly abstains (`None`) when there's no real
+entity to match (common for the compound/analytical question style used in
+this project's question bank).
+
+## 5. Fresh dataset regeneration (v2)
+
+Built `generate_training_data_v2.py`: mirrors the live pipeline exactly
+(including the regeneration loop), logs **every** attempt (not just the
+final one) with all raw signal values stored separately — so any weight
+combination can be recomputed later without regenerating data. Writes to a
+new, separate database (`data/judge_training_v2.db`) so this dataset can
+never mix with the old one.
+
+## 6. Infrastructure issues encountered and fixed during the run
+
+- **Recurring hangs** traced to orphaned `llama-server.exe` subprocesses
+  (children of `ollama.exe serve`) that survive a normal parent-process
+  restart on Windows (no cascade-kill) — they silently accumulated across
+  manual restarts, eating VRAM until the next verifier/judge call wedged.
+  Fixed by having the watchdog explicitly enumerate and kill
+  `llama-server.exe` processes directly, not just the `ollama serve` parent.
+- **Orphaned watchdog shells**: `TaskStop` on the monitoring harness did not
+  reliably kill the underlying shell process in this environment — multiple
+  watchdog instances accumulated and raced each other, causing duplicate
+  generator launches. Fixed by killing shells directly by PID going forward.
+- **Auto-recovery** built into `watchdog_v2.sh`: if no question completes
+  within a stall threshold, it automatically kills the generator, kills all
+  orphaned `llama-server.exe`, restarts Ollama's serve process, and
+  relaunches the generator — the full manual recovery sequence, now
+  self-healing (validated working end-to-end, ~20s to full recovery).
+- **VRAM over-subscription root cause**: running 2 questions concurrently
+  each needing up to 4 different ~6-9GB models was the underlying driver of
+  the recurring stalls. Fixed by reducing `CONCURRENCY` 2→1 — this also
+  dramatically *improved* single-question latency (35-37s vs. the previous
+  150-500s+ under contention), likely a net throughput win despite losing
+  parallelism. Stall-detection window tightened 15min→8min accordingly.
+
+## 7. Judge positivity bias — discovered and being addressed
+
+**Finding**: across the first ~870 rows of the 8-factor dataset, Judge
+totals clustered tightly near the ceiling — mean 76.3/80 (95.4%), stdev
+3.4, 81% of all scores in the 75-80 band. The rubric was not meaningfully
+discriminating between answers of different quality.
+
+**Attempt 1 — stricter rubric language**: rewrote the scoring-band
+descriptions (recalibrated so "competent/adequate" = 5-6 rather than 7-9,
+required explicit justification before awarding 9-10). Result: **no
+measurable effect** — 8 fresh completions under the new prompt still
+averaged 76.4/80 with the same tight spread. Conclusion: abstract
+calibration language does not override the model's systematic positivity
+bias as an LLM-judge, even with explicit anti-leniency instructions.
+
+**Decision**: archived the ~435 rows generated before this point
+(`data/judge_training_v2_lenient_rubric_ARCHIVE.db`) and restarted the v2
+dataset from scratch, so the eventual dataset uses one consistent standard
+throughout rather than repeating the earlier mixed-regime mistake.
+
+**Attempt 2 (in progress) — alternative judge models**:
+- **Prometheus 2** (`prometheus-eval/prometheus-7b-v2.0`, open-source model
+  specifically fine-tuned for LLM-evaluation tasks): pulled via Ollama
+  (HuggingFace GGUF, Q4_K_M). Tested with our exact 8-factor prompt format
+  on a real Q&A pair. Result: **produced a genuinely lower/more
+  differentiated score (54/80 = 67.5%)** — promising evidence of less
+  positivity bias — but **completely ignored our structured per-criterion
+  output format**, responding with free-form prose and a single overall
+  score instead. It's rigidly trained on its own template; not usable as a
+  drop-in replacement without either abandoning the 8-factor breakdown or
+  building a from-scratch integration around its native grading format.
+- **gemma2:9b**: format-compatible — followed the 8-factor structure
+  perfectly. Initial read looked promising (self-reported totals of 54/80
+  and 57/80, vs. qwen2.5's usual ~76/80).
+
+## 8. Parser bug found and fixed — corrects the gemma2 finding
+
+Investigating the gemma2 result surfaced a real bug: gemma2's own 8
+per-criterion scores for Answer A were `9,10,8,9,8,10,9,9` — which sum to
+**72** — but it then wrote `TOTAL: 54/80` (off by 18) in its own output.
+The parser (`utils/rubric_parser.py`) was trusting that literal
+self-reported "TOTAL: X/80" line over recomputing from the individual
+scores it had just parsed. **The apparent "less biased" gemma2 result was
+an arithmetic mistake in the model's own summation, not genuine stricter
+grading** — its real per-criterion judgments show the identical positivity
+pattern as qwen2.5 (72/80 = 90%, 75/80 = 94% once correctly summed).
+
+**Fix**: `_extract_total()` now always recomputes the total as the sum of
+the 8 parsed per-criterion scores; the model's self-reported total line is
+never trusted. Retroactively corrected all 54 rows collected so far in
+`judge_training_v2.db` (recomputed `judge_total_*`/`verifier_total_*` from
+the already-stored per-criterion columns — no LLM re-calls needed). Effect
+on the qwen2.5 baseline was small (76.3 → 76.1 mean, 3.4 → 3.1 stdev) —
+confirming qwen2.5's original bias measurement was not itself an artifact
+of this bug, mostly gemma2's was.
+
+**Revised conclusion**: neither qwen2.5 nor gemma2 show real improvement in
+positivity bias once measured correctly — both cluster at 90-95% of max at
+the true per-criterion level. Prometheus 2's result becomes moot for
+comparison purposes (it never produced parseable per-criterion scores in
+our format at all, so under the corrected parser its total is now
+correctly 0/80 - i.e. genuinely unusable in this schema, not a valid data
+point either way).
+
+**Methodological note for writeup**: this is a good illustration of why
+per-criterion structured scoring is more trustworthy than asking an LLM
+for a single aggregate number, or trusting an LLM's own arithmetic even
+when it also shows its work — the individual judgments were fine, the
+model's own addition wasn't. Always recompute derived totals from raw
+component scores rather than trusting a model's self-reported aggregate.
+
+## 9. Broader model search + decisive discrimination test
+
+To test whether the positivity bias was specific to qwen2.5, four more
+format-compatible models were tested with the identical prompt on the same
+real Q&A pair (question_idx=3, "difference between ML and DL"):
+
+| Model | Answer A total | Answer B total |
+|---|---|---|
+| qwen2.5 (baseline) | ~76/80 (typical) | ~76/80 (typical) |
+| gemma2:9b | 72/80 | 75/80 |
+| llama3.1:8b | 72/80 | 73/80 |
+| mixtral | 72/80 | 76/80 |
+| CompassJudger-1-7B | 72/80 | 75/80 |
+
+**All five models, across four different architectures/families, converged
+on the same 72-76/80 range on this example.** This raised a methodology
+concern: testing one (evidently strong) Q&A pair repeatedly only shows
+whether models agree that a good answer is good - it says nothing about
+whether they can tell a BAD answer apart from a good one.
+
+**Decisive test**: constructed one genuinely broken answer (factually wrong,
+contradictory, irrelevant claims) alongside a solid one, same question,
+tested on qwen2.5 and CompassJudger-1:
+
+| Model | Good answer | Deliberately wrong answer | Gap |
+|---|---|---|---|
+| qwen2.5 | 73/80 | **6/80** | 67 pts |
+| CompassJudger-1 | 64/80 | **19/80** | 45 pts |
+
+**Conclusion**: both models discriminate correctly when there's a genuine
+flaw to catch - the earlier "positivity bias" framing was partly a
+methodology artifact (repeatedly testing one strong example). The real
+question is which model is better *calibrated* on the space of realistic,
+mostly-competent answers this pipeline actually generates (LLaMA3/Mistral
+rarely produce answers as broken as the synthetic test case).
+
+## 10. Head-to-head validation, N=40 real scores — decision made
+
+Ran `training/compare_judge_models.py`: 20 real (question, answer_a,
+answer_b) triples sampled from the archived dataset, scored by both
+qwen2.5 and CompassJudger-1 under identical conditions (40 total scores
+per model).
+
+| Model | Mean | Stdev | Min | Max | % scoring ≥75 |
+|---|---|---|---|---|---|
+| qwen2.5 | 71.9/80 (89.9%) | 3.7 | 64 | **80** | 20.0% |
+| CompassJudger-1 | 70.0/80 (87.5%) | 3.8 | 60 | **73** | **0.0%** |
+
+CompassJudger-1 never once scored ≥75 across 40 real evaluations, and its
+observed ceiling (73) sits meaningfully below qwen2.5's (which hit the
+absolute max of 80 one in five times). Combined with Section 9's finding
+that it still correctly penalizes genuinely wrong content, this is real,
+N=40 evidence of a measurable (if not dramatic) calibration improvement.
+
+**Decision: switched the Judge from qwen2.5 to CompassJudger-1**
+(`agents/judge_agent.py::_get_auditor_model`, 2026-08-18). Per the
+project's standing rule that any judge/model change gets a fresh dataset
+(established after the earlier mixed-judge-regime lesson - see Section 1),
+archived the qwen2.5-judged partial dataset
+(`data/judge_training_v2_qwen25judge_ARCHIVE.db`, 55 questions) and
+restarted generation from scratch. Verifier remains phi3 for now (not
+re-tested against alternatives yet).
+
+## 11. Stricter rubric v3 (on top of the CompassJudger-1 switch)
+
+Even after switching to CompassJudger-1, requested the scoring language be
+tightened further. `agents/rubric.py::SCORING_GUIDE` was rewritten ("v3"):
+narrower bands (adequate=4-5 instead of 5-6, strong=6-7 instead of 7-8),
+and a mandatory step requiring the model to actively search for a specific
+flaw before awarding any score ≥7, capping the criterion at 6 if one is
+found. Applies to both Verifier and Judge since they share `rubric.py`.
+
+Per the project's standing rule (never mix scoring regimes in one
+database), the in-progress CompassJudger-1/v2-rubric run (12 rows) was
+retired and a fresh database started for CompassJudger-1 + rubric v3.
+
+**Process note for the record**: during the restart, a second/orphaned
+`watchdog_v2.sh` instance (a recurring class of bug in this project - see
+Section on infrastructure issues) silently auto-restarted the generator
+before the intended clean restart, and an attempt to archive the 12-row
+interim database lost that data (copied the `.db` file without checkpointing
+WAL first, then deleted the WAL). Net effect: those 12 CompassJudger-1/v2
+-rubric rows are unrecoverable, but since they were an early validation
+batch (not yet analyzed), this has no research impact. The rogue watchdog
+was killed and generation resumed cleanly under a single supervised
+instance. First 5 real rows under CompassJudger-1 + rubric v3:
+
+| Question | Judge A | Judge B | Verifier A | Verifier B | Weighted |
+|---|---|---|---|---|---|
+| CRISPR-Cas9 | 77 | 76 | 77 | 76 | 0.853 |
+| Quantum entanglement | 75 | 74 | 75 | 74 | 0.717 |
+| ML vs DL | 73 | 74 | 73 | 74 | 0.751 |
+| Neural network learning | 76 | 74 | 76 | 74 | 0.692 |
+| Turing test | 73 | 76 | 78 | 77 | 0.804 |
+
+Scores are still in the 73-78 range on this small sample - consistent with
+the Section 9-10 finding that rubric-wording changes alone move the needle
+less than the underlying judge model does. Will need a larger sample before
+concluding whether v3 has any measurable effect on top of the CompassJudger
+switch; flagged as an open question rather than a settled result.
+
+## 12. Anchoring bug: the Judge was not actually independent
+
+After Section 11's rubric tightening, checked whether identical scoring
+language for Verifier and Judge could explain their close scores. Query
+against the live database (37 rows) showed something worse than shared
+language:
+
+```
+verifier_total_a, judge_total_a, verifier_total_b, judge_total_b, agreement
+(77, 77, 76, 76, 1.0)
+(75, 75, 74, 74, 1.0)
+(73, 73, 74, 74, 1.0)
+... [32 of 37 rows had verifier_judge_agreement EXACTLY 1.0]
+```
+
+32/37 rows (86%) had Judge totals matching Verifier totals **exactly**,
+digit-for-digit across all 8 factors for both answers - not just similar,
+identical. Two genuinely independent 8-factor evaluations landing on the
+exact same 16 numbers that often is not plausible.
+
+**Root cause found in `agents/judge_agent.py::build_judge_prompt`**: the
+function received the Verifier's full raw output (including its per
+-criterion numeric scores) and inserted it directly into the Judge's
+prompt as `"VERIFIER'S INDEPENDENT SCORES (a 3rd-party opinion, not ground
+truth)"`. The system prompt told the Judge to "form your own independent
+judgment," but at temperature=0.1 with identical rubric anchoring, the
+Judge was overwhelmingly reproducing the shown numbers rather than
+re-deriving them. This meant `verifier_judge_agreement` (10% of the
+weighted-confidence formula) had been measuring anchoring/copying, not
+genuine second-opinion agreement, for the entire CompassJudger-1 run so
+far (and likely the qwen2.5-judge era too, since this bug predates the
+model switch).
+
+**Fix**: `build_judge_prompt()` no longer takes or includes the Verifier's
+output at all - the Judge now scores completely blind from the question
+and the two answers, matching what the module's own docstring always
+claimed the design did. `verifier_judge_agreement` is still computed the
+same way afterward (comparing the two already-generated, now genuinely
+independent score sets), so the pipeline's downstream code and DB schema
+are unchanged - only the Judge's input context changed. Updated call sites
+in `generate_training_data_v2.py`, `server.py`, `generate_training_data.py`,
+`main.py`. Kept the Verifier→Judge execution order sequential (not made
+concurrent) despite the two now being independent, to avoid reintroducing
+the VRAM over-subscription stalls documented earlier in this log.
+
+Per the no-mixed-regimes rule, archived the 40-row anchored-judge database
+(`data/judge_training_v2_anchoredjudge_ARCHIVE.db`) and restarted fresh.
+Open question for a future section: re-check `verifier_judge_agreement`
+once enough blind-scored rows exist - a healthy independent signal should
+show real spread (not clustering near 1.0), and a persistently high
+agreement post-fix would be a genuine (not artifactual) finding.
+
+## 13. Rubric v4: per-criterion descriptive anchors + anti-default rule
+
+After the Section 12 blind-judge fix, the Judge's totals still showed a
+suspicious pattern in the first 5 rows: 72 appeared as the Judge's total
+3 times across 3 unrelated questions (CRISPR, quantum entanglement, ML vs
+DL). That's consistent with a "comfortable default" value the model falls
+back to regardless of content, rather than content-driven scoring - a
+different failure mode than Section 12's anchoring bug, but with the same
+symptom (suspiciously repeated numbers).
+
+Hypothesis: `agents/rubric.py::FACTORS` gave each of the 8 criteria only a
+generic one-line description ("claims are accurate", "well-structured and
+easy to read") - the SAME vague standard applied to all 8, which gives a
+language model little concrete basis to differentiate a 4 from a 6 from
+an 8 on any specific criterion, inviting a memorized/default number.
+
+**Change ("v4")**: rewrote every entry in `FACTORS` to state a concrete,
+criterion-specific differentiator - e.g. Completeness's mid-band is now
+"covers the obvious parts but skips a sub-part, an edge case, or a caveat
+a subject-matter expert would expect" instead of a generic quality
+judgment. Also added an explicit ANTI-DEFAULT rule to `SCORING_GUIDE`:
+before finalizing a TOTAL, the model must be able to point to a specific
+sentence justifying that exact number for that exact question, and
+repeated identical totals across unrelated answers are flagged as
+suspicious rather than assumed correct.
+
+Per the no-mixed-regimes rule, archived the blind-judge/v3-rubric database
+(5 rows, `data/judge_training_v2_blindjudge_v3rubric_ARCHIVE.db`) and
+restarted fresh under rubric v4. This is a small, fast-moving set of
+changes (Sections 11-13 all landed within about an hour) - each individual
+change has too little data to draw firm conclusions yet; the goal for now
+is to get enough v4 rows to check whether the "72 pinning" pattern
+actually goes away, and to eventually go back and analyze whether v3 vs v4
+made a measurable difference once volume allows.
+
+## 14. CompassJudger-1 abandoned: it wasn't discriminating at all
+
+Investigated the "72" pattern flagged in Section 13 by looking at CompassJudger
+-1's PER-CRITERION scores, not just totals. Found something worse than a
+default-value habit: on most answers it gives **all 8 criteria the exact same
+score** (e.g. 9/9/9/9/9/9/9/9), with boilerplate justification sentences that
+were sometimes IDENTICAL between Answer A and Answer B despite different
+content. Quantified the flat-rate (all 8 scores identical) across every
+CompassJudger-1 batch collected:
+
+| Dataset (CompassJudger-1 as Judge) | n | % all-8-identical |
+|---|---|---|
+| Anchored on Verifier's scores (Section 12 bug, pre-fix) | 40 | 10% |
+| Blind, rubric v3 | 5 | 80% |
+| Blind, rubric v4 (descriptive factors) | 4 | 75% |
+| Blind, rubric v4, generation continued | 43 (cumulative) | ~74% |
+
+The rate got WORSE after fixing the anchoring bug, not better - when
+anchored, CompassJudger-1 was inadvertently inheriting the Verifier's real
+variation; scoring genuinely independently exposed that its own default
+behavior is to write plausible-sounding boilerplate around one flat number.
+Rubric v3→v4's more descriptive per-criterion language (Section 13) made no
+real difference (75% vs 80%, both on tiny n). **Conclusion: CompassJudger-1
+-7B was not fit for this task** - the original N=40 validation (Section 10)
+that motivated adopting it only checked TOTALS and mean/stdev/ceiling-rate,
+which never would have surfaced this, since a model that outputs the same
+constant per-criterion score across most answers still produces some spread
+in the total simply from which flat value it picks per question. That
+validation methodology gap is itself worth remembering for future model
+comparisons: check per-criterion variance, not just the total.
+
+Considered CompassJudger-1-32B (mradermacher GGUF, Q4_K_M ≈19GB) as a
+"bigger model, more capacity to actually reason" fix. Checked actual VRAM
+headroom first: `ollama ps` during a live pipeline run showed CompassJudger
+-7B + phi3 + mistral simultaneously resident at ~21GB/23GB (Ollama's
+`keep_alive` keeps recently-used models warm rather than unloading between
+pipeline stages) - a 19GB model would not coexist with the others without
+constant eviction/reload thrashing, the same VRAM over-subscription failure
+mode already fixed once in this project (see the CONCURRENCY=1 note in
+generate_training_data_v2.py). Started the download to test empirically
+anyway, but the user asked to stop it before completion given the risk;
+the partial download was deleted, no data lost (nothing had been generated
+with it).
+
+Also tried Prometheus-2 (prometheus-eval/prometheus-7b-v2.0, already
+available locally, purpose-built for rubric-based LLM evaluation). It
+ignores the pipeline's 8-criterion structured format entirely and writes
+free-form prose ending in its own native `[RESULT] N` single-score format -
+architecturally incompatible with this pipeline's per-criterion parsing
+without a substantial redesign. Deprioritized without further testing.
+
+## 15. qwen3.5:9b adopted - and a hybrid-reasoning pitfall
+
+Tried `qwen3.5:9b` (Alibaba's newer hybrid-reasoning small model, pulled
+from Ollama's official library). First attempt through the production
+`BaseAgent`/LangChain wrapper returned a **completely empty response** -
+not a parse failure, an actually empty string. Diagnosed directly via
+`ollama.generate()`: `done_reason='length'`, `eval_count=900` (the full
+token budget), response=`''`. qwen3.5 is a hybrid-reasoning model with an
+internal chain-of-thought phase; for a long, complex prompt (the full
+rubric + two answer texts), it can consume its ENTIRE `num_predict` budget
+on internal thinking and never emit the actual answer. A trivial "2+2"
+prompt worked fine and still used 259 tokens of thinking - confirming this
+model always reasons internally by default, and the judge prompt is just
+long enough to exhaust the budget before any visible output.
+
+**Fix**: Ollama's Python client accepts `think=False` to disable this.
+Confirmed it collapses token usage from 259→10 on the trivial prompt and
+produces real, complete output on the full judge prompt. Traced this
+through to LangChain's `OllamaLLM`, which exposes the same control as a
+`reasoning: bool | None` field (not obviously named - found by inspecting
+`OllamaLLM.model_fields` directly, not from any doc). Added a `reasoning`
+field to `agents/base_agent.py::BaseAgent` (passed straight through to
+`OllamaLLM`, `None` by default so it's a no-op for every other agent/model
+in the pipeline) and set it to `False` specifically for qwen3.5 in
+`agents/judge_agent.py::create_judge_agent`.
+
+With thinking disabled, ran the same blind, production-prompt evaluation
+on 20 real Q&A pairs (via `ollama.generate` directly, then re-verified
+through the actual `create_judge_agent()` factory end-to-end):
+
+- **Flat-rate (all 8 criteria identical): 0/20 = 0%** (vs CompassJudger-1's
+  ~75-80%)
+- Score range 50-77/80, mean 67.8/80 (84.8%) - real spread, not clustering
+- Genuine per-answer differentiation, e.g. Panama Canal question: 50 vs 77
+  (a 27-point gap reflecting an actual quality difference between answers)
+- Latency 8-24s per answer - comparable to CompassJudger-1, no throughput
+  cost from the switch
+
+**Decision: switched the Judge to qwen3.5:9b (reasoning disabled)**,
+replacing CompassJudger-1. This is now the third judge model in this
+project's history (qwen2.5 → CompassJudger-1 → qwen3.5:9b), each swap
+driven by a different, progressively more granular failure mode: qwen2.5
+had ceiling-hugging positivity bias (Section 6-10); CompassJudger-1 fixed
+the bias but turned out not to be discriminating between criteria at all
+(Section 14); qwen3.5:9b's only issue was a model-family-specific
+generation-config gap (thinking mode), not a scoring-quality problem.
+
+Per the no-mixed-regimes rule, archived the 43-row CompassJudger-1
+database (`data/judge_training_v2_compassjudger_flatscores_ARCHIVE.db`)
+and will restart fresh under qwen3.5:9b once generation is resumed.
+
+**Process note**: while restarting, discovered FOUR separate orphaned
+`watchdog_v2.sh` instances running simultaneously (each independently
+auto-restarting the generator whenever any one of them stopped it),
+causing repeated duplicate-process spawns and a locked database file
+during archiving. This is the same class of bug noted earlier in this
+log (`TaskStop` not reliably killing the tracked shell), but had
+accumulated to 4 concurrent orphans rather than 1-2, most likely from
+the several pause/resume cycles during this investigation. All four were
+found and killed directly via PID (not `TaskStop`, which only tracks one
+of them) before the database could be safely archived. Worth remembering:
+after any pause/resume cycle, check `ps aux | grep watchdog_v2` for
+duplicates before trusting a single `TaskStop` cleared everything.
+
+## 16. N=40 confirmation: qwen3.5:9b vs CompassJudger-1-7B
+
+Ran the full head-to-head validation (20 real Q&A pairs, both models, blind,
+production rubric v4, `reasoning=False` for qwen3.5) to confirm Section 15's
+smaller sample at proper scale:
+
+| Metric | qwen3.5:9b | CompassJudger-1-7B |
+|---|---|---|
+| n | 40 | 40 |
+| Mean | 65.5/80 (81.9%) | 69.3/80 (86.7%) |
+| Stdev | 9.5 | 9.3 |
+| Min / Max | 19 / 78 | 16 / 73 |
+| % scoring ≥75 | 10.0% | 0.0% |
+| **% flat (all 8 criteria identical)** | **0.0%** | **57.5%** |
+
+Confirms Section 14's finding at full scale: CompassJudger-1 gives all 8
+rubric criteria the exact same score on the majority (57.5%) of
+evaluations - the similar stdev between the two models is misleading on
+its own, since CompassJudger-1's spread comes from which single flat value
+it happens to pick per question, not from genuine per-criterion analysis.
+qwen3.5:9b never produced a flat score across all 40 evaluations.
+
+**Final decision: qwen3.5:9b (reasoning disabled) is the production Judge**,
+replacing CompassJudger-1-7B. Ready to resume the 5000-question generation
+run fresh under this model once given the go-ahead (paused per user
+request while this investigation was ongoing).
+
+## 17. Position/identity bias: LLaMA 3 was always "Answer 1"
+
+User question prompted a check that had never actually been verified in
+this project: was the assignment of which model's answer goes into
+"Answer 1" vs "Answer 2" randomized to cancel out position bias? It was
+not. Confirmed in code:
+
+- `generate_training_data_v2.py`: `answer_a, answer_b = ...(llama3_agent,
+  mistral_agent)` - LLaMA 3 was unconditionally position A, Mistral
+  unconditionally position B, for every single question in the project's
+  history.
+- Worse than plain position bias: the Verifier and Judge system prompts
+  hardcoded the labels `"Answer 1 (LLaMA 3)"` / `"Answer 2 (Mistral)"`,
+  and the per-call prompt text said `"--- ANSWER 1 (LLaMA 3) ---"` /
+  `"--- ANSWER 2 (Mistral) ---"` - the model was explicitly told which
+  brand wrote which answer, every time. Position and identity were both
+  confounded, always in the same direction, for the whole dataset.
+
+Checked win-rate (A vs B) across every dataset collected so far:
+
+| Dataset | Judge | A (LLaMA3, pos 1) | B (Mistral, pos 2) |
+|---|---|---|---|
+| lenient_rubric | qwen2.5 | 60.6% (264/436) | 39.4% |
+| qwen25judge (fixed rubric) | qwen2.5 | 66.1% (37/56) | 33.9% |
+| anchoredjudge | CompassJudger-1 | 42.5% (17/40) | 57.5% |
+| compassjudger_flatscores | CompassJudger-1 | 27.9% (12/43) | 72.1% |
+
+The majority direction FLIPS between judge models (qwen2.5 favored
+position 1/LLaMA3 by 60-66%; CompassJudger-1 favored position 2/Mistral
+by 58-72%). If this reflected a genuine LLaMA-3-vs-Mistral quality gap,
+different judges should broadly agree on which model wins more often,
+with the margin varying - not flip which model is "better" entirely.
+This pattern is the signature of judge-specific position/identity bias
+confounding the win-rate signal, not a real quality difference. This
+means every "winner" statistic collected in this project to date is
+unreliable as a measure of LLaMA-3-vs-Mistral quality - it's at least
+partly measuring each judge's own position/brand preference instead.
+
+**Fix, four layers**:
+1. `agents/judge_agent.py`, `agents/verifier_agent.py`,
+   `agents/combiner_agent.py`: stripped all "(LLaMA 3)" / "(Mistral)"
+   labels from every prompt (both the static system-prompt output
+   template and the per-call "ANSWER 1/2" headers). These agents now
+   never see which model produced which answer - only "Answer 1" /
+   "Answer 2", genuinely blind to identity.
+2. `generate_training_data_v2.py::run_one_attempt`: after generating both
+   answers, `random.random() < 0.5` decides whether LLaMA 3 or Mistral
+   lands in position A for THIS question. Every question gets an
+   independent coin flip.
+3. New DB columns `model_a` / `model_b` (values `"llama3"`/`"mistral"`)
+   record which physical model was actually in each position, so true
+   per-model win rates remain fully recoverable by joining on this column
+   - nothing is lost, the confound is just no longer baked into the
+   agents' inputs.
+4. `server.py` (the live interactive single-query pipeline) fixed as a
+   follow-up: added a `remap_ab()` helper (`utils/rubric_parser.py`) that
+   swaps every `<x>_a`/`<x>_b` key pair (and flips `winner`) in a parsed
+   score dict. Per attempt, `server.py` now randomly decides which answer
+   the Verifier/Judge see as "Answer 1" internally (independent of the
+   fixed UI display order), then immediately remaps their parsed output
+   back to UI order right after parsing - so every line downstream
+   (`total_winner`, `winner_answer`, the `confidence` SSE event, the
+   combiner call) is untouched and still correctly assumes
+   answer1=LLaMA3/answer2=Mistral, while the Judge itself scored a
+   randomized, brand-blind pair. The human-facing stream still shows
+   LLaMA 3 as "Stage 1" and Mistral as "Stage 2" exactly as before -
+   only the Judge's internal view changed.
+
+Per the no-mixed-regimes rule, archived the 5-row position-biased qwen3.5
+database (`data/judge_training_v2_qwen35_positionbiased_ARCHIVE.db`) and
+restarted fresh with position randomization active. Once enough
+position-randomized data accumulates, worth re-running the win-rate check
+(A/B should now land near 50/50 in aggregate if the bias hypothesis is
+correct, and any residual skew after grouping by `model_a`/`model_b`
+would be a more trustworthy signal of genuine LLaMA-3-vs-Mistral quality
+difference).
+
+## 18. Checkpoint analysis: 670/5000 questions under the fixed pipeline
+
+First substantive look at the dataset since all of Sections 12-17's fixes
+landed (blind Judge scoring, qwen3.5:9b, rubric v4, position/identity
+randomization). Snapshot at 670/5000 final questions (765 total attempts
+logged, all under one consistent regime - no mixed-regime rows).
+
+**Pipeline health**
+- Regeneration rate: 14.2% of questions needed at least one retry (95
+  extra attempts / 670 questions) - healthy, not excessive.
+- Only 2.4% of final answers land below the 0.68 confidence threshold -
+  the regeneration loop is doing its job; most low-confidence attempts
+  get caught and retried rather than shipped.
+- 73s average per attempt (median 67.5s), consistent with the
+  no-contention baseline established earlier in the session.
+
+**Score distributions**
+
+| | Judge (qwen3.5:9b) | Verifier (phi3) |
+|---|---|---|
+| Mean | 66.6/80 (83.3%) | 74.0/80 (92.5%) |
+| Stdev | 6.8 | 2.7 |
+| % scoring >=75 | 7.5% | - |
+| Min / Max | 0* / 79 | 10 / 80 |
+
+Judge mean (66.6) is close to the earlier N=40 validation's 65.5 (Section
+16) - production behavior matches the pre-deployment test, a good sign
+the validation was representative rather than a fluke.
+
+**New finding: the Verifier (phi3), never tested, shows the same
+clustering pattern the whole Judge investigation was chasing.** Mean
+92.5% with stdev only 2.7 is the same "positivity clustering" signature
+as qwen2.5's original bias (Section 1-10). Only the Judge model has ever
+been swapped/validated for this; phi3 has run unchanged and unexamined
+since the start of the project. Flagged as an open candidate for the same
+kind of scrutiny (per-criterion flat-rate check, alternative model
+comparison) - not yet acted on, pending direction.
+
+**Flat-rate in production confirms the fix**: 0.1% (1/1340 individual
+scores) - matches the N=40 pre-deployment validation's 0%, versus
+CompassJudger-1's 57.5% at the same check (Section 16). The single biggest
+quality change from this session's work.
+
+**Position/identity bias re-check (post-fix)**: win rate by raw position
+is still skewed (A 40.6% / B 59.4%), but by TRUE model identity it's much
+closer to balanced (LLaMA 3 46.9% / Mistral 53.1%). The GAP between these
+two splits (position skew larger than identity skew) suggests a residual,
+smaller bias independent of brand: the Judge leans toward whichever answer
+it sees SECOND (position 2), on top of a real but modest ~6-point Mistral
+quality edge. This is a cleaner result than anything possible before
+Section 17's fix, since position and identity are no longer confounded
+together - worth reporting as a genuine (if secondary) finding rather
+than dismissing as noise, given n=670.
+
+**Fact-check signal coverage**: Wikipedia matched 94% of winning answers
+(avg relevance-gated score 0.685); Wikidata matched only 51% (avg 0.496).
+Matches the known limitation noted earlier (Section on wikidata_check.py)
+that Wikidata's label-matcher search is structurally weaker than
+Wikipedia's full-text search for extracting relevant entities from
+free-text answers - not a new problem, just now quantified at scale.
+
+**Parser edge case found (rare, informational)**: one row
+("What is epigenetics?") has `judge_total_b=0`. Not a real score - qwen3.5
+visibly went into a self-correcting arithmetic loop in its own output
+("Still over... let's lower X to hit exactly 80") and switched to
+shorthand labels (`QR: 10`, `CR: 9`) instead of the required
+`- Question Relevance: X/10` format for Answer 2's section, which the
+regex parser doesn't recognize - defaults unmatched criteria to 0. The
+model's actual intended total was ~80/80, not 0. Rate: 1/670 = 0.15%,
+too rare to justify a parser or prompt change on its own, but recorded
+here so it doesn't look like an unexplained anomaly later.
+
+## 19. Infrastructure: durable auto-restart via Windows Task Scheduler
+
+Three separate multi-hour/multi-day generation gaps occurred (17 hours,
+40 minutes, then 4 full days) where every pipeline process died -
+`keep_awake.py`, `viewer_server_v2.py`, `server.py`, the generator, and the
+in-session bash watchdog (`watchdog_v2.sh`) - leaving only Ollama itself
+running. Root cause: the watchdog and all core processes were launched
+from within a Claude Code session's background shell tree, which does not
+survive terminal closure, session teardown, or the machine sleeping -
+`keep_awake.py`'s `SetThreadExecutionState` calls only block *automatic*
+idle sleep, not every possible interruption (manual sleep, session loss,
+etc). Each gap was only caught the next time a monitoring check happened
+to run in an active session - not durable for an unattended multi-day run.
+
+**Fix**: added `heartbeat.ps1` - checks whether each of the 4 core
+processes is running (`Get-CimInstance Win32_Process` + command-line
+match) and restarts any that are missing. Registered as a genuine Windows
+Scheduled Task (`AgenticLLM_Heartbeat`, via `schtasks /Create`, since
+`Register-ScheduledTask` hit an access-denied error in this environment)
+that fires every 5 minutes indefinitely, independent of any terminal or
+Claude Code session, plus once at logon. Verified end-to-end: manually
+triggered via `schtasks /Run`, confirmed result code 0 and a log entry in
+`heartbeat_log.txt`.
+
+This is a coarser check than `watchdog_v2.sh` (which also detects a
+still-running-but-stalled process via DB/log staleness) - it only catches
+"process is completely gone," not "process is hung." That was sufficient
+for all three gaps actually observed (each was a total process death, not
+a hang), so it directly closes the failure mode that mattered without
+over-building. The in-session watchdog still runs as a second, smarter
+layer whenever a session is active.
+
+*(Log continues below as further tests complete.)*

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dataset Generation Progress — v2</title>
+<style>
+  :root {
+    --bg: #05060d; --panel: #0e1224; --panel-2: #12162b; --line: rgba(255,255,255,0.1);
+    --text: #eef0ff; --text-dim: #9aa0c3; --text-faint: #5b6187;
+    --cyan: #00f0ff; --violet: #7b5cff; --magenta: #ff2ee6;
+    --green: #37ff8b; --gold: #ffd23f; --red: #ff4d5e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    padding: 32px 20px 80px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 {
+    font-size: 1.6rem; font-weight: 900; margin: 0 0 4px;
+    background: linear-gradient(90deg, var(--cyan), var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub { color: var(--text-dim); font-size: 0.88rem; margin-bottom: 28px; }
+
+  .hero {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 28px; margin-bottom: 22px; text-align: center;
+  }
+  .hero-count { font-size: clamp(2.6rem, 8vw, 4rem); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .hero-count .of { color: var(--text-faint); font-size: 0.4em; font-weight: 700; }
+  .hero-label { color: var(--text-dim); font-size: 0.9rem; margin-top: 6px; }
+  .bar-track { height: 14px; border-radius: 999px; background: var(--panel-2); margin: 20px 0 10px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta)); transition: width .6s ease; }
+  .hero-meta { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-faint); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .stat-val { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat-lbl { font-size: 0.72rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.6px; margin-top: 4px; }
+
+  .section-title { font-size: 0.95rem; font-weight: 800; margin: 0 0 12px; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 0.82rem; }
+  thead th { text-align: left; padding: 10px 12px; background: var(--panel-2); color: var(--text-faint); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--line); }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--text-dim); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.flash { animation: flash 1.2s ease; }
+  @keyframes flash { 0% { background: rgba(0,240,255,0.18); } 100% { background: transparent; } }
+  .q-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .win-a { color: var(--cyan); font-weight: 700; }
+  .win-b { color: var(--violet); font-weight: 700; }
+  .score-ok { color: var(--green); }
+  .score-low { color: var(--gold); }
+  .attempt-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; background: var(--panel-2); border: 1px solid var(--line); }
+  .attempt-badge.regen { color: var(--gold); border-color: var(--gold); }
+
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-faint); margin-bottom: 18px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .dot.stale { background: var(--red); animation: none; }
+
+  tbody tr.row-clickable { cursor: pointer; }
+  tbody tr.row-clickable:hover td { background: rgba(255,255,255,0.04); }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    z-index: 100; padding: 24px 16px; overflow-y: auto;
+  }
+  .modal-overlay.open { display: block; }
+  .modal {
+    max-width: 920px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 26px 28px 32px; position: relative;
+  }
+  .modal-close {
+    position: absolute; top: 18px; right: 18px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--text-dim); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 1rem;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-q { font-size: 1.05rem; font-weight: 800; color: var(--text); margin: 0 44px 4px 0; }
+  .modal-meta { color: var(--text-faint); font-size: 0.78rem; margin-bottom: 20px; }
+  .modal-section-title { font-size: 0.85rem; font-weight: 800; color: var(--text); margin: 24px 0 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .modal-section-title:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .answer-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .answer-col { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .answer-col.is-winner { border-color: var(--green); }
+  .answer-col-title { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); margin-bottom: 8px; }
+  .answer-col.is-winner .answer-col-title { color: var(--green); }
+  .answer-text { font-size: 0.82rem; color: var(--text-dim); white-space: pre-wrap; max-height: 220px; overflow-y: auto; line-height: 1.5; }
+  .score-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .score-table th, .score-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  .score-table th { color: var(--text-faint); font-weight: 700; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.4px; }
+  .score-table td { color: var(--text-dim); }
+  .score-table td.num { text-align: center; font-variant-numeric: tabular-nums; color: var(--text); }
+  .sig-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .sig-item { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .sig-val { font-size: 1rem; font-weight: 800; color: var(--text); }
+  .sig-lbl { font-size: 0.65rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px; }
+  .raw-block { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 0.76rem; color: var(--text-dim); white-space: pre-wrap; max-height: 260px; overflow-y: auto; line-height: 1.5; }
+  details.raw-details summary { cursor: pointer; font-size: 0.78rem; color: var(--text-faint); font-weight: 700; margin-bottom: 8px; }
+  details.raw-details summary:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dataset Generation Progress</h1>
+  <div class="sub">Live from data/judge_training_v2.db — 8-factor dual verifier/judge scoring, auto-refreshes every 5s. Click any row for the full report.</div>
+
+  <div class="status-line"><span class="dot" id="live-dot"></span><span id="status-text">Connecting…</span></div>
+
+  <div class="hero">
+    <div class="hero-count"><span id="count-done">–</span><span class="of" id="count-of"> / 5000</span></div>
+    <div class="hero-label">questions fully generated</div>
+    <div class="bar-track"><div class="bar-fill" id="bar-fill"></div></div>
+    <div class="hero-meta">
+      <span id="pct-label">0%</span>
+      <span id="eta-label">ETA: calculating…</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="stat"><div class="stat-val" id="stat-attempts">–</div><div class="stat-lbl">Total attempts logged</div></div>
+    <div class="stat"><div class="stat-val" id="stat-regen">–</div><div class="stat-lbl">Questions regenerated</div></div>
+    <div class="stat"><div class="stat-val" id="stat-score">–</div><div class="stat-lbl">Avg weighted score</div></div>
+    <div class="stat"><div class="stat-val" id="stat-agreement">–</div><div class="stat-lbl">Avg verifier↔judge agreement</div></div>
+    <div class="stat"><div class="stat-val" id="stat-elapsed">–</div><div class="stat-lbl">Avg seconds / attempt</div></div>
+    <div class="stat"><div class="stat-val" id="stat-rate">–</div><div class="stat-lbl">Questions / hour (recent)</div></div>
+    <div class="stat"><div class="stat-val" id="stat-wins">–</div><div class="stat-lbl">Winner split (LLaMA/Mistral)</div></div>
+    <div class="stat"><div class="stat-val" id="stat-judge">–</div><div class="stat-lbl">Avg judge total (A / B, /80)</div></div>
+  </div>
+
+  <div class="section-title">Recently completed</div>
+  <table>
+    <thead><tr><th>Question</th><th>Attempt</th><th>Winner</th><th>Score</th><th>Judge A/B</th><th>Time</th></tr></thead>
+    <tbody id="recent-body"><tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+    <div id="modal-body">Loading…</div>
+  </div>
+</div>
+
+<script>
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+let lastIds = new Set();
+let rateHistory = []; // [{t, done}]
+
+function fmtPct(v){ return v===null||v===undefined ? 'n/a' : Math.round(v*100)+'%'; }
+
+async function poll() {
+  try {
+    const p = await fetch('/api/progress').then(r => r.json());
+    if (p.error) throw new Error(p.error);
+
+    document.getElementById('live-dot').className = 'dot';
+    document.getElementById('status-text').textContent = `Live — last update ${p.last_at ? new Date(p.last_at).toLocaleTimeString() : 'n/a'}`;
+
+    const done = p.done || 0, target = p.target || 5000;
+    document.getElementById('count-done').textContent = done;
+    document.getElementById('count-of').textContent = ` / ${target}`;
+    const pct = (done / target) * 100;
+    document.getElementById('bar-fill').style.width = pct + '%';
+    document.getElementById('pct-label').textContent = pct.toFixed(1) + '%';
+
+    document.getElementById('stat-attempts').textContent = p.attempts_total ?? '–';
+    document.getElementById('stat-regen').textContent = p.regenerated_count ?? '–';
+    document.getElementById('stat-score').textContent = fmtPct(p.avg_weighted_score);
+    document.getElementById('stat-agreement').textContent = fmtPct(p.avg_vj_agreement);
+    document.getElementById('stat-elapsed').textContent = p.avg_elapsed ? p.avg_elapsed.toFixed(0) + 's' : '–';
+    document.getElementById('stat-wins').textContent = `${p.wins_a ?? 0} / ${p.wins_b ?? 0}`;
+    document.getElementById('stat-judge').textContent = `${p.avg_judge_total_a ?? '–'} / ${p.avg_judge_total_b ?? '–'}`;
+
+    // Rate + ETA from recent completion timestamps
+    const times = (p.recent_completion_times || []).map(t => new Date(t).getTime()).filter(Boolean).sort((a,b)=>a-b);
+    if (times.length >= 2) {
+      const spanMs = times[times.length-1] - times[0];
+      const perQuestionMs = spanMs / (times.length - 1);
+      const rate = perQuestionMs > 0 ? (3600000 / perQuestionMs) : 0;
+      document.getElementById('stat-rate').textContent = rate.toFixed(1);
+      const remaining = target - done;
+      if (rate > 0 && remaining > 0) {
+        const etaHours = remaining / rate;
+        const etaDays = etaHours / 24;
+        document.getElementById('eta-label').textContent = etaDays >= 1
+          ? `ETA: ~${etaDays.toFixed(1)} days`
+          : `ETA: ~${etaHours.toFixed(1)} hours`;
+      } else if (remaining <= 0) {
+        document.getElementById('eta-label').textContent = 'Complete!';
+      }
+    }
+
+    const recent = await fetch('/api/recent?limit=25').then(r => r.json());
+    const rows = recent.rows || [];
+    const tbody = document.getElementById('recent-body');
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">No completions yet…</td></tr>';
+    } else {
+      const newIds = new Set();
+      tbody.innerHTML = rows.map(r => {
+        const rowKey = `${r.question_idx}-${r.attempt_number}`;
+        newIds.add(rowKey);
+        const isNew = !lastIds.has(rowKey) && lastIds.size > 0;
+        const winClass = r.winner === 'A' ? 'win-a' : 'win-b';
+        const winName = r.winner === 'A' ? 'LLaMA 3' : 'Mistral';
+        const scoreClass = (r.weighted_score ?? 0) >= 0.68 ? 'score-ok' : 'score-low';
+        const attemptClass = r.attempt_number > 1 ? 'attempt-badge regen' : 'attempt-badge';
+        const ts = r.created_at ? new Date(r.created_at).toLocaleTimeString() : '';
+        return `<tr class="${isNew ? 'flash' : ''} row-clickable" data-id="${r.id}">
+          <td class="q-cell" title="${esc(r.question)}">${esc(r.question)}</td>
+          <td><span class="${attemptClass}">#${r.attempt_number}</span></td>
+          <td class="${winClass}">${winName}</td>
+          <td class="${scoreClass}">${r.weighted_score !== null ? (r.weighted_score*100).toFixed(1)+'%' : '–'}</td>
+          <td>${r.judge_total_a}/${r.judge_total_b}</td>
+          <td>${ts}</td>
+        </tr>`;
+      }).join('');
+      lastIds = newIds;
+    }
+  } catch (err) {
+    document.getElementById('live-dot').className = 'dot stale';
+    document.getElementById('status-text').textContent = 'Connection error — is viewer_server_v2.py running?';
+  }
+}
+
+const FACTORS = [
+  ['factual_correctness', 'Factual Correctness'],
+  ['question_relevance', 'Question Relevance'],
+  ['context_relevance', 'Context Relevance'],
+  ['faithfulness', 'Faithfulness'],
+  ['completeness', 'Completeness'],
+  ['hallucination_free', 'Hallucination-Free'],
+  ['clarity', 'Clarity'],
+  ['consistency', 'Consistency'],
+];
+
+function fmtNum(v, digits) {
+  if (v === null || v === undefined) return '–';
+  return typeof v === 'number' ? v.toFixed(digits ?? 2) : v;
+}
+
+function scoreTable(title, detail, prefix) {
+  const rows = FACTORS.map(([slug, label]) => {
+    const a = detail[`${prefix}_${slug}_a`];
+    const b = detail[`${prefix}_${slug}_b`];
+    return `<tr><td>${label}</td><td class="num">${a ?? '–'}</td><td class="num">${b ?? '–'}</td></tr>`;
+  }).join('');
+  const totA = detail[`${prefix}_total_a`], totB = detail[`${prefix}_total_b`];
+  return `
+    <div class="modal-section-title">${title}</div>
+    <table class="score-table">
+      <thead><tr><th>Criterion</th><th>Answer A</th><th>Answer B</th></tr></thead>
+      <tbody>${rows}<tr><td><strong>TOTAL</strong></td><td class="num"><strong>${totA ?? '–'}</strong></td><td class="num"><strong>${totB ?? '–'}</strong></td></tr></tbody>
+    </table>`;
+}
+
+function renderDetail(d) {
+  const winName = d.winner === 'A' ? 'LLaMA 3 (Answer A)' : 'Mistral (Answer B)';
+  const aWin = d.winner === 'A', bWin = d.winner === 'B';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-q">${esc(d.question)}</div>
+    <div class="modal-meta">
+      Question #${d.question_idx} · Attempt ${d.attempt_number} · Winner: ${winName} ·
+      Weighted score: ${d.weighted_score !== null ? (d.weighted_score*100).toFixed(1)+'%' : '–'} ·
+      ${d.elapsed_secs ? d.elapsed_secs.toFixed(0)+'s' : ''} · ${d.created_at ? new Date(d.created_at).toLocaleString() : ''}
+    </div>
+
+    <div class="modal-section-title" style="border-top:none;margin-top:0;">Answers</div>
+    <div class="answer-cols">
+      <div class="answer-col ${aWin ? 'is-winner' : ''}">
+        <div class="answer-col-title">Answer A — LLaMA 3 ${aWin ? '★ Winner' : ''}</div>
+        <div class="answer-text">${esc(d.answer_a || '')}</div>
+      </div>
+      <div class="answer-col ${bWin ? 'is-winner' : ''}">
+        <div class="answer-col-title">Answer B — Mistral ${bWin ? '★ Winner' : ''}</div>
+        <div class="answer-text">${esc(d.answer_b || '')}</div>
+      </div>
+    </div>
+
+    ${scoreTable('Verifier scores (phi3, independent)', d, 'verifier')}
+    ${scoreTable('Judge scores (qwen3.5:9b, independent)', d, 'judge')}
+
+    <div class="modal-section-title">Signals & weighted confidence</div>
+    <div class="sig-grid">
+      <div class="sig-item"><div class="sig-val">${fmtPct(d.model_agreement)}</div><div class="sig-lbl">Model agreement (A↔B)</div></div>
+      <div class="sig-item"><div class="sig-val">${fmtPct(d.verifier_judge_agreement)}</div><div class="sig-lbl">Verifier↔Judge agreement</div></div>
+      <div class="sig-item"><div class="sig-val">${fmtNum(d.sem_sim_a,3)} / ${fmtNum(d.sem_sim_b,3)}</div><div class="sig-lbl">Semantic similarity A/B</div></div>
+      <div class="sig-item"><div class="sig-val">${fmtPct(d.wikipedia_score)}</div><div class="sig-lbl">Wikipedia fact-check</div></div>
+      <div class="sig-item"><div class="sig-val">${fmtPct(d.wikidata_score)}</div><div class="sig-lbl">Wikidata fact-check</div></div>
+      <div class="sig-item"><div class="sig-val">${d.weighted_score !== null ? (d.weighted_score*100).toFixed(1)+'%' : '–'}</div><div class="sig-lbl">Final weighted score</div></div>
+    </div>
+    ${(d.wikipedia_source || d.wikidata_source) ? `<div class="modal-meta" style="margin-top:10px;">
+      ${d.wikipedia_source ? 'Wikipedia: ' + esc(d.wikipedia_source) : ''} ${d.wikidata_source ? ' · Wikidata: ' + esc(d.wikidata_source) : ''}
+    </div>` : ''}
+
+    <div class="modal-section-title">Raw model output</div>
+    <details class="raw-details"><summary>Verifier raw output (phi3)</summary><div class="raw-block">${esc(d.verifier_raw || '(none)')}</div></details>
+    <details class="raw-details" style="margin-top:12px;"><summary>Judge raw output (qwen3.5:9b, incl. verdict reasoning)</summary><div class="raw-block">${esc(d.judge_raw || '(none)')}</div></details>
+  `;
+}
+
+async function openDetail(id) {
+  const overlay = document.getElementById('modal-overlay');
+  document.getElementById('modal-body').innerHTML = 'Loading…';
+  overlay.classList.add('open');
+  try {
+    const d = await fetch(`/api/detail?id=${id}`).then(r => r.json());
+    if (d.error) throw new Error(d.error);
+    renderDetail(d);
+  } catch (err) {
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);">Failed to load report: ${esc(err.message)}</div>`;
+  }
+}
+
+document.getElementById('recent-body').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (tr) openDetail(tr.getAttribute('data-id'));
+});
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('modal-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-overlay') document.getElementById('modal-overlay').classList.remove('open');
+});
+
+poll();
+setInterval(poll, 5000);
+</script>
+</body>
+</html>

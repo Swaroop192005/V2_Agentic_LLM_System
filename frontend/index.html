@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neural Stream — Agentic Multi-LLM Validation System</title>
+  <meta name="description" content="Watch multiple local LLMs collaborate live to generate, verify, fact-check, score, and synthesise the best answer — powered by LLaMA 3, Mistral, and agentic orchestration." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
+</head>
+<body>
+
+  <div class="bg-fx" aria-hidden="true">
+    <div class="bg-grid"></div>
+    <div class="nebula n1"></div>
+    <div class="nebula n2"></div>
+    <div class="nebula n3"></div>
+  </div>
+
+  <div class="shell">
+
+    <!-- ── Topbar ─────────────────────────────────────── -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">⚡</div>
+        <div class="brand-word">Neural Stream<small>Agentic Multi-LLM Pipeline</small></div>
+      </div>
+      <div class="nav-pills">
+        <label class="pill" id="rag-toggle-label">
+          <input type="checkbox" id="rag-checkbox" checked />
+          📚 RAG Mode
+        </label>
+        <button class="pill" id="rag-upload-btn" onclick="document.getElementById('rag-file-input').click()">📎 Upload Docs</button>
+        <input type="file" id="rag-file-input" style="display:none" accept=".pdf,.txt,.md,.json,.py" multiple onchange="uploadRagDocs(this)" />
+        <button class="pill" id="context-btn">🗄️ Context <span class="pill-badge" id="ctx-badge" style="display:none">0</span></button>
+      </div>
+    </div>
+
+    <span id="rag-status-msg"></span>
+
+    <!-- ── Health strip ───────────────────────────────── -->
+    <div id="health-bar" class="health" role="status" aria-live="polite">
+      <div class="health-dot"></div>
+      <span id="health-msg">Checking Ollama connection…</span>
+    </div>
+
+    <!-- ── Hero ───────────────────────────────────────── -->
+    <div class="hero">
+      <h1>Multiple minds. One verified answer.</h1>
+      <p>LLaMA 3 and Mistral answer independently, an impartial verifier fact-checks both, a judge scores them on five criteria, external Wikipedia cross-checks the winner, and a combiner ships the final result — regenerating automatically if confidence is too low.</p>
+    </div>
+
+    <!-- ── Query card ─────────────────────────────────── -->
+    <div class="query-card" id="query-card">
+      <label for="query-input">Ask something</label>
+      <textarea id="query-input" placeholder="e.g. How does gradient descent actually converge?"></textarea>
+      <div class="query-footer">
+        <span id="char-count">0 characters</span>
+        <span class="hint">Ctrl/Cmd + Enter to run</span>
+        <button class="btn-launch" id="submit-btn">🚀 Run Pipeline</button>
+      </div>
+    </div>
+
+    <!-- ── Pipeline rail ──────────────────────────────── -->
+    <div class="rail-wrap" id="rail-wrap">
+      <div class="rail">
+        <div class="rail-track" id="rail-track"></div>
+      </div>
+    </div>
+
+    <!-- ── Regenerate banner ──────────────────────────── -->
+    <div class="regen-banner" id="regen-banner">
+      <div class="regen-spin"></div>
+      <div class="regen-text" id="regen-text">Regenerating…</div>
+    </div>
+
+    <!-- ── Confidence gauge ────────────────────────────── -->
+    <div class="confidence-card" id="confidence-card">
+      <div class="gauge" id="gauge"><span class="gauge-val" id="gauge-val">—</span></div>
+      <div class="conf-body">
+        <div class="conf-title" id="conf-title">Confidence score</div>
+        <div class="conf-sub" id="conf-sub">Weighted blend of judge rubric, similarity, cross-model agreement, and Wikipedia fact-check.</div>
+        <div class="conf-chips" id="conf-chips"></div>
+      </div>
+    </div>
+
+    <!-- ── Timer ──────────────────────────────────────── -->
+    <div class="timer" id="timer-display"></div>
+
+    <!-- ── Results stream ─────────────────────────────── -->
+    <div class="stream" id="stream"></div>
+
+    <!-- ── Post actions ───────────────────────────────── -->
+    <div class="post-actions" id="post-actions" hidden>
+      <button class="btn-ghost-lg" id="new-question-btn">✦ Ask another question</button>
+    </div>
+
+  </div>
+
+  <!-- ── Context drawer ─────────────────────────────────── -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-head">
+      <span class="drawer-title">🗄️ Rolling Context</span>
+      <div class="drawer-actions">
+        <button class="icon-btn" id="ctx-clear-btn" title="Clear stored history">🗑️</button>
+        <button class="icon-btn" id="ctx-close-btn" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="drawer-body" id="ctx-records">
+      <p class="ctx-empty">No queries stored yet.</p>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=4"></script>
+</body>
+</html>

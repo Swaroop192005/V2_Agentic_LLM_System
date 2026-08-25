@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Live Judge Dataset Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:      #0a0d14;
+      --surface: #111622;
+      --card:    #151d2e;
+      --border:  rgba(99,122,182,0.18);
+      --accent:  #4f8ef7;
+      --purple:  #a78bfa;
+      --green:   #34d399;
+      --yellow:  #f59e0b;
+      --red:     #f87171;
+      --muted:   #64748b;
+      --text:    #e2e8f0;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+    /* ─── HEADER ─── */
+    header{
+      background:linear-gradient(135deg,#0d1526,#111827);
+      border-bottom:1px solid var(--border);
+      padding:18px 32px;display:flex;align-items:center;gap:14px;
+      position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);
+    }
+    .logo{width:40px;height:40px;background:linear-gradient(135deg,#4f8ef7,#a78bfa);border-radius:10px;
+          display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+    header h1{font-size:1.2rem;font-weight:700;letter-spacing:-.02em}
+    header p{font-size:.75rem;color:var(--muted);margin-top:2px}
+    .header-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+    .live-badge{
+      display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;
+      color:var(--green);background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);
+      padding:5px 11px;border-radius:20px;cursor:default;
+    }
+    .live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.4s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+    .last-update{font-size:.7rem;color:var(--muted)}
+
+    /* NEW ROW TOAST */
+    #toast{
+      position:fixed;top:72px;right:20px;z-index:999;
+      background:rgba(52,211,153,.15);border:1px solid rgba(52,211,153,.4);
+      color:var(--green);padding:10px 18px;border-radius:10px;
+      font-size:.8rem;font-weight:600;
+      opacity:0;transform:translateY(-8px);transition:all .3s;pointer-events:none;
+    }
+    #toast.show{opacity:1;transform:translateY(0)}
+
+    /* ─── MAIN ─── */
+    main{max-width:1600px;margin:0 auto;padding:24px}
+
+    /* ─── STATS ─── */
+    .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:14px;margin-bottom:24px}
+    .stat-card{
+      background:var(--card);border:1px solid var(--border);border-radius:14px;
+      padding:16px 18px;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;
+    }
+    .stat-card::before{content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(79,142,247,.05),transparent 60%)}
+    .stat-card:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.4)}
+    .stat-label{font-size:.68rem;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px}
+    .stat-value{font-size:1.8rem;font-weight:700;letter-spacing:-.03em}
+    .stat-sub{font-size:.7rem;color:var(--muted);margin-top:4px}
+
+    .winner-bars{margin-top:10px;display:flex;flex-direction:column;gap:5px}
+    .wbar-row{display:flex;align-items:center;gap:6px;font-size:.72rem}
+    .wbar-track{flex:1;height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+    .wbar-fill{height:100%;border-radius:3px;transition:width .6s}
+    .wbar-label{width:70px;color:var(--muted)}
+    .wbar-num{width:36px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:.7rem}
+
+    /* ─── TOOLBAR ─── */
+    .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+    .search-wrap{flex:1;min-width:200px;max-width:340px;position:relative}
+    .search-wrap input{
+      width:100%;padding:9px 12px 9px 34px;background:var(--card);
+      border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:.83rem;
+      outline:none;font-family:'Inter',sans-serif;transition:border-color .2s;
+    }
+    .search-wrap input:focus{border-color:var(--accent)}
+    .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px}
+    select,.fbtn{
+      background:var(--card);border:1px solid var(--border);border-radius:10px;
+      color:var(--text);font-size:.8rem;padding:9px 13px;outline:none;cursor:pointer;
+      font-family:'Inter',sans-serif;transition:border-color .2s;
+    }
+    select:focus,.fbtn:hover{border-color:var(--accent)}
+    .fbtn.active{background:rgba(79,142,247,.15);border-color:var(--accent);color:var(--accent)}
+    .fgroup{display:flex;gap:5px;flex-wrap:wrap}
+    .count-pill{
+      margin-left:auto;font-size:.75rem;color:var(--muted);
+      background:var(--card);border:1px solid var(--border);padding:6px 12px;border-radius:8px;
+      display:flex;align-items:center;gap:6px;
+    }
+    .count-new{
+      background:rgba(52,211,153,.15);color:var(--green);border:none;
+      font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:12px;
+      display:none;
+    }
+
+    /* ─── TABLE ─── */
+    .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+    table{width:100%;border-collapse:collapse;font-size:.82rem}
+    thead{background:rgba(79,142,247,.06);border-bottom:1px solid var(--border)}
+    th{
+      padding:11px 13px;text-align:left;font-weight:600;color:var(--muted);
+      font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;
+    }
+    tr.row{border-bottom:1px solid rgba(99,122,182,.08);cursor:pointer;transition:background .15s}
+    tr.row:hover{background:rgba(79,142,247,.05)}
+    tr.row:last-child{border-bottom:none}
+    tr.row.new-flash{animation:rowFlash 2s ease}
+    @keyframes rowFlash{0%,100%{background:transparent}20%{background:rgba(52,211,153,.12)}}
+    td{padding:10px 13px;vertical-align:middle}
+
+    .q-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;display:block}
+    .id-mono{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--muted)}
+    .elapsed-mono{font-family:'JetBrains Mono',monospace;font-size:.73rem;color:var(--muted)}
+
+    .bar-wrap{display:flex;align-items:center;gap:5px}
+    .bar-track{flex:1;height:5px;background:rgba(255,255,255,.08);border-radius:3px}
+    .bar-fill{height:100%;border-radius:3px}
+    .llama-fill{background:linear-gradient(90deg,#2563eb,#4f8ef7)}
+    .mistral-fill{background:linear-gradient(90deg,#7c3aed,#a78bfa)}
+    .bar-num{font-size:.73rem;font-weight:600;width:22px;text-align:right;flex-shrink:0}
+
+    .winner-badge{
+      display:inline-flex;align-items:center;gap:4px;font-size:.72rem;font-weight:600;
+      padding:3px 9px;border-radius:20px;white-space:nowrap;
+    }
+    .wA{background:rgba(79,142,247,.15);color:#7eb8ff;border:1px solid rgba(79,142,247,.3)}
+    .wB{background:rgba(167,139,250,.15);color:#c4b5fd;border:1px solid rgba(167,139,250,.3)}
+    .wT{background:rgba(148,163,184,.08);color:var(--muted);border:1px solid rgba(148,163,184,.2)}
+
+    .cpill{
+      display:inline-block;font-size:.72rem;font-weight:600;
+      font-family:'JetBrains Mono',monospace;padding:2px 6px;border-radius:5px;
+    }
+    .c-hi{background:rgba(52,211,153,.12);color:#6ee7b7}
+    .c-me{background:rgba(245,158,11,.1);color:#fcd34d}
+    .c-lo{background:rgba(248,113,113,.1);color:#fca5a5}
+
+    /* ─── PAGINATION ─── */
+    .pagination{display:flex;align-items:center;justify-content:center;gap:5px;margin-top:18px;flex-wrap:wrap}
+    .pbtn{
+      width:33px;height:33px;border-radius:8px;border:1px solid var(--border);
+      background:var(--card);color:var(--muted);cursor:pointer;font-size:.8rem;
+      display:flex;align-items:center;justify-content:center;transition:all .15s;font-family:'Inter',sans-serif;
+    }
+    .pbtn:hover:not(:disabled){border-color:var(--accent);color:var(--text)}
+    .pbtn.active{background:rgba(79,142,247,.2);border-color:var(--accent);color:var(--accent);font-weight:600}
+    .pbtn:disabled{opacity:.3;cursor:not-allowed}
+    .pinfo{font-size:.75rem;color:var(--muted);padding:0 5px}
+
+    /* ─── MODAL ─── */
+    .overlay{
+      position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:500;
+      display:none;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;
+    }
+    .overlay.open{display:flex;animation:fadeIn .18s}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .modal{
+      background:var(--surface);border:1px solid var(--border);border-radius:18px;
+      width:100%;max-width:1020px;box-shadow:0 32px 80px rgba(0,0,0,.65);
+      animation:slideUp .22s ease;overflow:hidden;
+    }
+    @keyframes slideUp{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+    .mhdr{
+      display:flex;align-items:flex-start;gap:14px;padding:20px 26px 16px;
+      border-bottom:1px solid var(--border);
+    }
+    .mid{
+      font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--muted);
+      background:rgba(255,255,255,.05);padding:3px 8px;border-radius:5px;flex-shrink:0;margin-top:2px;
+    }
+    .mq{font-size:1rem;font-weight:600;line-height:1.4;flex:1}
+    .mclose{
+      width:30px;height:30px;border-radius:8px;border:1px solid var(--border);
+      background:rgba(255,255,255,.05);color:var(--muted);cursor:pointer;font-size:15px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;transition:all .15s;
+    }
+    .mclose:hover{background:rgba(248,113,113,.15);color:var(--red);border-color:rgba(248,113,113,.3)}
+    .mbody{padding:22px 26px}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+    .mpanel{
+      background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:14px 16px;
+    }
+    .mpanel.hl{border-color:rgba(79,142,247,.4);background:rgba(79,142,247,.05)}
+    .ptitle{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+
+    .mrow{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+    .mrow-name{font-size:.73rem;color:var(--muted);width:90px;flex-shrink:0}
+    .mrow-bar{flex:1;height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+    .mrow-fill{height:100%;border-radius:3px}
+    .mrow-val{font-size:.72rem;font-family:'JetBrains Mono',monospace;width:28px;text-align:right}
+    .mrow.total-row{margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+
+    .ans-box{
+      background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;
+      padding:14px 16px;max-height:290px;overflow-y:auto;
+    }
+    .ans-box.hl{border-color:rgba(79,142,247,.4)}
+    .ans-box::-webkit-scrollbar{width:4px}
+    .ans-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+    .atitle{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+    .atext{font-size:.78rem;line-height:1.62;color:#c4d0e5;white-space:pre-wrap;word-break:break-word}
+
+    .sect-box{
+      background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;
+      padding:12px 14px;max-height:250px;overflow-y:auto;
+    }
+    .sect-box::-webkit-scrollbar{width:4px}
+    .sect-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+    .stitle{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+            margin-bottom:8px;color:var(--muted)}
+    .stext{font-size:.76rem;line-height:1.6;color:#c4d0e5;white-space:pre-wrap;word-break:break-word}
+
+    .meta-bar{
+      display:flex;flex-wrap:wrap;gap:16px;padding:12px 16px;
+      background:rgba(0,0,0,.2);border-radius:10px;font-size:.74rem;
+    }
+    .mi{display:flex;flex-direction:column;gap:2px}
+    .mk{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+    .mv{font-family:'JetBrains Mono',monospace;font-size:.76rem}
+
+    /* Polled progress indicator */
+    .poll-bar{height:2px;background:rgba(79,142,247,.15);position:fixed;top:0;left:0;right:0;z-index:200}
+    .poll-fill{height:100%;background:var(--accent);width:0%;transition:width .4s linear}
+
+    @media(max-width:680px){
+      .two-col{grid-template-columns:1fr}
+      header{padding:12px 14px}
+      main{padding:14px 10px}
+    }
+  </style>
+</head>
+<body>
+
+<div class="poll-bar"><div class="poll-fill" id="pollFill"></div></div>
+<div id="toast"></div>
+
+<header>
+  <div class="logo">⚖️</div>
+  <div>
+    <h1>Live Judge Dataset Viewer</h1>
+    <p>LLaMA 3 vs Mistral · Auto-refreshes every 5 s</p>
+  </div>
+  <div class="header-right">
+    <span class="last-update" id="lastUpdate">Loading…</span>
+    <div class="live-badge" id="liveBadge" title="Connected to local server">
+      <div class="live-dot"></div> LIVE
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="stats-grid" id="statsGrid"></div>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input id="searchInput" type="text" placeholder="Search questions…"/>
+    </div>
+    <div class="fgroup">
+      <button class="fbtn active" onclick="setFilter(this,'all')">All</button>
+      <button class="fbtn" onclick="setFilter(this,'A')">🔵 LLaMA Wins</button>
+      <button class="fbtn" onclick="setFilter(this,'B')">🟣 Mistral Wins</button>
+      <button class="fbtn" onclick="setFilter(this,'unknown')">⚪ Tie</button>
+    </div>
+    <select id="sortSel" onchange="applyAll()">
+      <option value="id_desc">Newest First</option>
+      <option value="id_asc">Oldest First</option>
+      <option value="score_a_desc">LLaMA Score ↓</option>
+      <option value="score_b_desc">Mistral Score ↓</option>
+      <option value="elapsed_asc">Fastest First</option>
+      <option value="elapsed_desc">Slowest First</option>
+    </select>
+    <div class="count-pill">
+      <span id="countLabel">— records</span>
+      <span class="count-new" id="newBadge"></span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:38px">#</th>
+        <th style="width:48px">ID</th>
+        <th>Question</th>
+        <th style="width:128px">LLaMA 3</th>
+        <th style="width:128px">Mistral</th>
+        <th style="width:88px">Comp. A</th>
+        <th style="width:88px">Comp. B</th>
+        <th style="width:98px">Winner</th>
+        <th style="width:70px">Time</th>
+        <th style="width:88px">Created</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pagination" id="pagination"></div>
+</main>
+
+<div class="overlay" id="overlay" onclick="closeOutside(event)">
+  <div class="modal" id="modal">
+    <div class="mhdr">
+      <span class="mid" id="mId"></span>
+      <div class="mq" id="mQ"></div>
+      <button class="mclose" onclick="closeModal()">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="two-col">
+        <div class="mpanel" id="panelA">
+          <div class="ptitle"><span style="color:#4f8ef7">🔵 LLaMA 3</span><span id="compA" style="margin-left:auto"></span></div>
+          <div id="metrA"></div>
+        </div>
+        <div class="mpanel" id="panelB">
+          <div class="ptitle"><span style="color:#a78bfa">🟣 Mistral</span><span id="compB" style="margin-left:auto"></span></div>
+          <div id="metrB"></div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="ans-box" id="ansA">
+          <div class="atitle" style="color:#4f8ef7">Answer A · LLaMA 3</div>
+          <div class="atext" id="ansAText"></div>
+        </div>
+        <div class="ans-box" id="ansB">
+          <div class="atitle" style="color:#a78bfa">Answer B · Mistral</div>
+          <div class="atext" id="ansBText"></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-bottom:14px">
+        <div class="sect-box">
+          <div class="stitle">⚖️ Judge Verdict</div>
+          <div class="stext" id="sJudge"></div>
+        </div>
+        <div class="sect-box">
+          <div class="stitle">🔬 Verifier Analysis</div>
+          <div class="stext" id="sVerif"></div>
+        </div>
+      </div>
+      <div class="meta-bar" id="mMeta"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const API        = 'http://localhost:7788';
+const POLL_MS    = 5000;   // refresh interval
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE  = 20;
+let allData      = [];     // full dataset
+let filteredData = [];
+let currentPage  = 1;
+let currentFilter= 'all';
+let currentSearch= '';
+let currentSort  = 'id_desc';
+let maxKnownId   = 0;
+let pollTimer    = null;
+let pollProgress = 0;
+let pollInterval = null;
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await fetchAll();
+  startPolling();
+}
+
+async function fetchAll() {
+  try {
+    const res = await fetch(`${API}/api/all`);
+    if (!res.ok) throw new Error('not ok');
+    const { rows } = await res.json();
+    allData = rows;
+    maxKnownId = allData.reduce((m,r)=>Math.max(m,r.id),0);
+    updateLastUpdate();
+    setConnected(true);
+    await fetchStats();
+    applyAll();
+  } catch(e) {
+    setConnected(false);
+    document.getElementById('lastUpdate').textContent = 'Connection error – retrying…';
+  }
+}
+
+async function fetchStats() {
+  try {
+    const res = await fetch(`${API}/api/stats`);
+    if (!res.ok) return;
+    const s = await res.json();
+    renderStats(s);
+  } catch(_){}
+}
+
+async function pollNew() {
+  try {
+    const res = await fetch(`${API}/api/all`);
+    if (!res.ok) throw new Error();
+    const { rows } = await res.json();
+    if (rows && rows.length !== allData.length) {
+      const diff = rows.length - allData.length;
+      allData = rows;
+      maxKnownId = allData.reduce((m,r)=>Math.max(m,r.id),0);
+      if (diff > 0) {
+        showNewToast(diff);
+        showNewBadge(diff);
+      }
+      applyAll();
+    }
+    setConnected(true);
+    updateLastUpdate();
+    await fetchStats();
+  } catch(e) {
+    setConnected(false);
+  }
+}
+
+// ── POLLING ───────────────────────────────────────────────────────────────────
+function startPolling() {
+  clearTimeout(pollTimer);
+  clearInterval(pollInterval);
+  pollProgress = 0;
+  animatePollBar();
+  pollTimer = setInterval(async ()=>{
+    pollProgress = 0;
+    animatePollBar();
+    await pollNew();
+  }, POLL_MS);
+}
+
+function animatePollBar() {
+  clearInterval(pollInterval);
+  pollProgress = 0;
+  const fill = document.getElementById('pollFill');
+  fill.style.transition = 'width 0s';
+  fill.style.width = '0%';
+  requestAnimationFrame(()=>{
+    fill.style.transition = `width ${POLL_MS/1000}s linear`;
+    fill.style.width = '100%';
+  });
+}
+
+// ── STATS ─────────────────────────────────────────────────────────────────────
+function renderStats(s) {
+  const total = s.total || 0;
+  const wA = s.wins_a || 0;
+  const wB = s.wins_b || 0;
+  const ties = s.ties || 0;
+  const pA = total ? Math.round(wA/total*100) : 0;
+  const pB = total ? Math.round(wB/total*100) : 0;
+  const pT = 100-pA-pB;
+  const avgSecs = s.avg_elapsed || 0;
+  const mins = (avgSecs/60).toFixed(1);
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Total Samples</div>
+      <div class="stat-value" style="color:var(--accent)">${total}</div>
+      <div class="stat-sub">${(s.first_at||'').slice(0,10)} → ${(s.last_at||'').slice(0,10)}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Winner Split</div>
+      <div class="winner-bars">
+        <div class="wbar-row">
+          <span class="wbar-label" style="color:#7eb8ff">🔵 LLaMA</span>
+          <div class="wbar-track"><div class="wbar-fill llama-fill" style="width:${pA}%"></div></div>
+          <span class="wbar-num" style="color:#7eb8ff">${wA}</span>
+        </div>
+        <div class="wbar-row">
+          <span class="wbar-label" style="color:#c4b5fd">🟣 Mistral</span>
+          <div class="wbar-track"><div class="wbar-fill mistral-fill" style="width:${pB}%"></div></div>
+          <span class="wbar-num" style="color:#c4b5fd">${wB}</span>
+        </div>
+        <div class="wbar-row">
+          <span class="wbar-label">⚪ Tie</span>
+          <div class="wbar-track"><div class="wbar-fill" style="width:${pT}%;background:rgba(148,163,184,.4)"></div></div>
+          <span class="wbar-num">${ties}</span>
+        </div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg LLaMA Score</div>
+      <div class="stat-value" style="color:#4f8ef7">${s.avg_score_a||0}<span style="font-size:.9rem;color:var(--muted)">/50</span></div>
+      <div class="stat-sub">Composite: ${s.avg_composite_a||0}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Mistral Score</div>
+      <div class="stat-value" style="color:#a78bfa">${s.avg_score_b||0}<span style="font-size:.9rem;color:var(--muted)">/50</span></div>
+      <div class="stat-sub">Composite: ${s.avg_composite_b||0}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Gen Time</div>
+      <div class="stat-value" style="color:var(--green)">${mins}<span style="font-size:.9rem;color:var(--muted)"> min</span></div>
+      <div class="stat-sub">Per sample (both agents)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Latest ID</div>
+      <div class="stat-value" style="color:var(--yellow)">#${s.max_id||'—'}</div>
+      <div class="stat-sub">Highest record so far</div>
+    </div>
+  `;
+}
+
+// ── FILTER / SORT ─────────────────────────────────────────────────────────────
+let newFlashIds = new Set();
+
+function setFilter(btn, w) {
+  document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = w;
+  currentPage = 1;
+  applyAll();
+}
+
+document.getElementById('searchInput').addEventListener('input', e=>{
+  currentSearch = e.target.value.toLowerCase();
+  currentPage = 1;
+  applyAll();
+});
+
+function applyAll() {
+  let d = [...allData];
+  if (currentFilter !== 'all') d = d.filter(r=>r.winner===currentFilter);
+  if (currentSearch) d = d.filter(r=>r.question?.toLowerCase().includes(currentSearch));
+
+  const sort = document.getElementById('sortSel').value;
+  d.sort((a,b)=>{
+    if (sort==='id_asc')       return a.id-b.id;
+    if (sort==='score_a_desc') return (b.total_a||0)-(a.total_a||0);
+    if (sort==='score_b_desc') return (b.total_b||0)-(a.total_b||0);
+    if (sort==='elapsed_asc')  return (a.elapsed_secs||0)-(b.elapsed_secs||0);
+    if (sort==='elapsed_desc') return (b.elapsed_secs||0)-(a.elapsed_secs||0);
+    return b.id-a.id; // id_desc default
+  });
+
+  filteredData = d;
+  document.getElementById('countLabel').textContent = `${d.length} record${d.length!==1?'s':''}`;
+  renderTable();
+  renderPagination();
+}
+
+// ── TABLE ─────────────────────────────────────────────────────────────────────
+function renderTable() {
+  const start = (currentPage-1)*PAGE_SIZE;
+  const page  = filteredData.slice(start, start+PAGE_SIZE);
+  const tb    = document.getElementById('tbody');
+
+  if (!page.length) {
+    tb.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:38px;color:var(--muted)">No records found</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = page.map((r,i)=>{
+    const n   = start+i+1;
+    const pA  = Math.round((r.total_a||0)/50*100);
+    const pB  = Math.round((r.total_b||0)/50*100);
+    const ca  = (r.composite_a||0).toFixed(2);
+    const cb  = (r.composite_b||0).toFixed(2);
+    const cc  = v => parseFloat(v)>=8.5?'c-hi':parseFloat(v)>=7?'c-me':'c-lo';
+    const ela = r.elapsed_secs ? (r.elapsed_secs/60).toFixed(1)+'m' : '—';
+    const cr  = (r.created_at||'').slice(11,16);
+    const date= (r.created_at||'').slice(5,10);
+    const wCls= r.winner==='A'?'wA':r.winner==='B'?'wB':'wT';
+    const wLbl= r.winner==='A'?'🔵 LLaMA':r.winner==='B'?'🟣 Mistral':'⚪ Tie';
+    const flash= newFlashIds.has(r.id)?' new-flash':'';
+    return `<tr class="row${flash}" onclick="openModal(${r.id})">
+      <td style="color:var(--muted);font-size:.7rem">${n}</td>
+      <td><span class="id-mono">#${r.id}</span></td>
+      <td><span class="q-text" title="${esc(r.question)}">${esc(r.question)}</span></td>
+      <td><div class="bar-wrap"><div class="bar-track"><div class="bar-fill llama-fill" style="width:${pA}%"></div></div><span class="bar-num">${r.total_a||0}</span></div></td>
+      <td><div class="bar-wrap"><div class="bar-track"><div class="bar-fill mistral-fill" style="width:${pB}%"></div></div><span class="bar-num">${r.total_b||0}</span></div></td>
+      <td><span class="cpill ${cc(ca)}">${ca}</span></td>
+      <td><span class="cpill ${cc(cb)}">${cb}</span></td>
+      <td><span class="winner-badge ${wCls}">${wLbl}</span></td>
+      <td><span class="elapsed-mono">${ela}</span></td>
+      <td style="font-size:.7rem;color:var(--muted)">${date}<br/>${cr}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── PAGINATION ────────────────────────────────────────────────────────────────
+function renderPagination() {
+  const total = Math.ceil(filteredData.length/PAGE_SIZE);
+  const pg    = document.getElementById('pagination');
+  if (total<=1){pg.innerHTML='';return}
+  const range = pageRange(currentPage,total);
+  let h = `<button class="pbtn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹</button>`;
+  range.forEach(p=>{
+    if(p==='…') h+=`<span class="pinfo">…</span>`;
+    else h+=`<button class="pbtn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`;
+  });
+  h+=`<button class="pbtn" onclick="goPage(${currentPage+1})" ${currentPage===total?'disabled':''}>›</button>`;
+  h+=`<span class="pinfo">${currentPage}/${total}</span>`;
+  pg.innerHTML=h;
+}
+function pageRange(cur,total){
+  if(total<=7)return Array.from({length:total},(_,i)=>i+1);
+  const r=[1];
+  if(cur>3)r.push('…');
+  for(let i=Math.max(2,cur-1);i<=Math.min(total-1,cur+1);i++)r.push(i);
+  if(cur<total-2)r.push('…');
+  r.push(total);
+  return r;
+}
+function goPage(p){
+  const total=Math.ceil(filteredData.length/PAGE_SIZE);
+  if(p<1||p>total)return;
+  currentPage=p;
+  renderTable();renderPagination();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ── NEW ROW FEEDBACK ──────────────────────────────────────────────────────────
+function flashNewRows(ids){
+  ids.forEach(id=>newFlashIds.add(id));
+  setTimeout(()=>{ ids.forEach(id=>newFlashIds.delete(id)); },4000);
+}
+function showNewToast(n){
+  const t=document.getElementById('toast');
+  t.textContent=`✨ ${n} new record${n>1?'s':''} added!`;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),3200);
+}
+function showNewBadge(n){
+  const b=document.getElementById('newBadge');
+  b.textContent=`+${n} new`;
+  b.style.display='inline-block';
+  setTimeout(()=>{ b.style.display='none'; },5000);
+}
+
+// ── CONNECTIVITY ──────────────────────────────────────────────────────────────
+function setConnected(ok){
+  const b=document.getElementById('liveBadge');
+  if(ok){
+    b.style.color='var(--green)';b.style.background='rgba(52,211,153,.1)';
+    b.style.borderColor='rgba(52,211,153,.25)';b.innerHTML=`<div class="live-dot"></div> LIVE`;
+  } else {
+    b.style.color='var(--red)';b.style.background='rgba(248,113,113,.1)';
+    b.style.borderColor='rgba(248,113,113,.25)';b.innerHTML='⚠ Disconnected';
+  }
+}
+function updateLastUpdate(){
+  const now=new Date().toLocaleTimeString();
+  document.getElementById('lastUpdate').textContent=`Updated ${now}`;
+}
+
+// ── MODAL ─────────────────────────────────────────────────────────────────────
+const METRICS=[['factual','Factual Acc.'],['completeness','Completeness'],['clarity','Clarity'],
+               ['relevance','Relevance'],['depth','Depth']];
+
+function openModal(id){
+  const r=allData.find(d=>d.id===id); if(!r)return;
+  document.getElementById('mId').textContent=`#${r.id}`;
+  document.getElementById('mQ').textContent=r.question;
+
+  function panels(sfx,fillCls){
+    return METRICS.map(([m,lbl])=>{
+      const v=r[`${m}_${sfx}`]||0;
+      return `<div class="mrow"><div class="mrow-name">${lbl}</div>
+        <div class="mrow-bar"><div class="mrow-fill ${fillCls}" style="width:${v/10*100}%"></div></div>
+        <div class="mrow-val">${v}/10</div></div>`;
+    }).join('')+`
+    <div class="mrow total-row">
+      <div class="mrow-name" style="font-weight:700;color:var(--text)">Total</div>
+      <div class="mrow-bar"><div class="mrow-fill ${fillCls}" style="width:${(r[`total_${sfx}`]||0)/50*100}%"></div></div>
+      <div class="mrow-val" style="font-weight:700;color:var(--text)">${r[`total_${sfx}`]||0}/50</div>
+    </div>`;
+  }
+  document.getElementById('metrA').innerHTML=panels('a','llama-fill');
+  document.getElementById('metrB').innerHTML=panels('b','mistral-fill');
+  document.getElementById('compA').innerHTML=cpill(r.composite_a||0);
+  document.getElementById('compB').innerHTML=cpill(r.composite_b||0);
+
+  const hl = r.winner==='A'?'panelA':r.winner==='B'?'panelB':null;
+  ['panelA','panelB','ansA','ansB'].forEach(id=>document.getElementById(id).classList.remove('hl'));
+  if(hl){ document.getElementById(hl).classList.add('hl');
+          document.getElementById(hl==='panelA'?'ansA':'ansB').classList.add('hl'); }
+
+  document.getElementById('ansAText').textContent=r.answer_a||'—';
+  document.getElementById('ansBText').textContent=r.answer_b||'—';
+  document.getElementById('sJudge').textContent=r.judge_raw||'—';
+  document.getElementById('sVerif').textContent=r.verifier_text||'—';
+
+  const wLabel=r.winner==='A'?'🔵 LLaMA 3 (A)':r.winner==='B'?'🟣 Mistral (B)':'⚪ Tie';
+  const elapsed=r.elapsed_secs?(r.elapsed_secs/60).toFixed(2)+' min':'—';
+  document.getElementById('mMeta').innerHTML=`
+    <div class="mi"><div class="mk">Winner</div><div class="mv">${wLabel}</div></div>
+    <div class="mi"><div class="mk">Sem Sim A</div><div class="mv">${(r.sem_sim_a||0).toFixed(4)}</div></div>
+    <div class="mi"><div class="mk">Sem Sim B</div><div class="mv">${(r.sem_sim_b||0).toFixed(4)}</div></div>
+    <div class="mi"><div class="mk">Word Count A</div><div class="mv">${r.word_count_a||'—'}</div></div>
+    <div class="mi"><div class="mk">Word Count B</div><div class="mv">${r.word_count_b||'—'}</div></div>
+    <div class="mi"><div class="mk">Length Score A</div><div class="mv">${(r.length_score_a||0).toFixed(2)}</div></div>
+    <div class="mi"><div class="mk">Length Score B</div><div class="mv">${(r.length_score_b||0).toFixed(2)}</div></div>
+    <div class="mi"><div class="mk">Elapsed</div><div class="mv">${elapsed}</div></div>
+    <div class="mi"><div class="mk">Created</div><div class="mv">${(r.created_at||'').replace('T',' ').slice(0,19)}</div></div>
+  `;
+  document.getElementById('overlay').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeModal(){document.getElementById('overlay').classList.remove('open');document.body.style.overflow='';}
+function closeOutside(e){if(e.target===document.getElementById('overlay'))closeModal();}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function esc(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function cpill(v){const cls=v>=8.5?'c-hi':v>=7?'c-me':'c-lo';return `<span class="cpill ${cls}">${parseFloat(v).toFixed(2)}</span>`}
+
+// ── START ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
