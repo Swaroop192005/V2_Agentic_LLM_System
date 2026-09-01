@@ -702,4 +702,97 @@ a hang), so it directly closes the failure mode that mattered without
 over-building. The in-session watchdog still runs as a second, smarter
 layer whenever a session is active.
 
+## 20. Weight/threshold sweep: no ground truth, so label-free objectives
+
+The weighted-confidence formula (`utils/scoring.py::DEFAULT_WEIGHTS` -
+judge 40%, similarity 15%, model_agreement 10%, verifier_judge_agreement
+10%, wikipedia 15%, wikidata 10% - and `DEFAULT_THRESHOLD = 0.68`) had
+been a starting guess since the beginning of the v2 pipeline, never
+actually validated. Built `training/threshold_weight_sweep.py` to test it
+against the ~1765 attempt rows collected so far under the current
+(qwen3.5:9b, position-randomized) regime.
+
+There is no ground-truth "this answer is objectively correct" label
+anywhere in this dataset, so two label-free objectives were used instead
+of accuracy-against-a-target:
+
+**1. Internal consistency**: for each signal, build a composite from the
+OTHER signals only (properly renormalized) and correlate it against the
+held-out signal. A weighting under which signals predict each other well
+is more likely capturing real shared "quality" signal than one dominated
+by a single noisy weight.
+
+**2. Regeneration validity**: for questions that got a 2nd attempt, check
+whether attempt 2 actually scored better on signals OTHER than judge
+(to avoid circularity) - a meaningful threshold should mostly trigger
+regeneration when attempt 1 truly was weaker.
+
+**Methodological catch found along the way**: `verifier_judge_agreement`
+correlates 0.737 with `judge` in this data - expected, since it's
+mathematically computed FROM the judge and verifier totals
+(`compute_agreement()` in `utils/rubric_parser.py`). Weighting it heavily
+inflates the internal-consistency metric without adding real independent
+signal - it's partially a restatement of `judge`, not corroboration. The
+first sweep run (that included it as a free variable) produced misleading
+top candidates (e.g. verifier_judge_agreement at 0.78 weight) for exactly
+this reason. Re-ran with it excluded from the free search for a trustworthy
+result.
+
+**Clean weight-sweep result** (5 genuinely independent signals: judge,
+similarity, model_agreement, wikipedia, wikidata):
+
+| | judge | similarity | model_agreement | wikipedia | wikidata | score |
+|---|---|---|---|---|---|---|
+| Default (renormalized) | 0.44 | 0.17 | 0.11 | 0.17 | 0.11 | 0.1216 |
+| Best of 3000 random candidates | ~0.25 | ~0.29 | ~0.09 | ~0.33 | ~0.03 | 0.1331 |
+
+Directional finding: similarity and Wikipedia consistently want MORE
+weight than the default gives them; wikidata wants LESS (converging near
+0) - consistent with Section 18's finding that Wikidata only matches 51%
+of questions with a noisier average score. Judge's weight comes down
+somewhat but stays substantial. Effect size is real but modest (+0.011,
+~9% relative improvement in the consistency metric) - a hypothesis worth
+testing further as more data accumulates, not a confident final answer.
+Weights have NOT been changed in production pending more data.
+
+**Threshold sweep hit a harder limitation: selection bias / censored
+data.** The sweep is only informative BELOW 0.68 - above it, results are
+identical for every threshold tested (184 flagged, 0 not-flagged), because
+the live pipeline only ever generates a 2nd attempt when attempt 1 scored
+below 0.68. There is no data on whether an ABOVE-threshold first attempt
+would also have improved on retry, because it's never been given the
+chance. Sub-0.68 data shows retry-improvement rates hovering 77-89% across
+the 0.58-0.66 range with no sharp cliff - 0.68 doesn't look obviously
+wrong, but this data can't confirm it's optimal either.
+
+## 21. Control-group regeneration added to close the threshold blind spot
+
+To fix Section 20's censored-data problem properly (not just note it),
+added a genuine control group to `generate_training_data_v2.py`: when a
+first attempt already scores >= 0.68 (i.e. would normally ship
+immediately), there is now an 8% chance (`CONTROL_REGEN_PROBABILITY`) it
+gets a 2nd attempt anyway, purely to measure whether already-passing
+answers also tend to improve on retry. This is additive and safe for
+production quality - the existing "keep whichever attempt scored higher"
+logic (`process_question`'s `best` tracking) is untouched, so a control
+retry can never make a shipped answer worse, only occasionally produce
+an even better one that gets kept.
+
+Each attempt row now records WHY a regeneration happened, in a new
+`regen_reason` column (`'low_confidence'` for a genuine sub-threshold
+retry, `'control_sample'` for this new control group, `NULL` for a normal
+single-pass question) - added via `ALTER TABLE ... ADD COLUMN` on the live
+database (backward compatible; the ~1765 existing rows just have NULL).
+No archive/restart needed since this doesn't change how any individual
+attempt is scored, judged, or ranked - only whether a rare extra attempt
+gets logged for research purposes on top of the existing consistent regime.
+
+At 8% of roughly 3500 remaining questions, this should accumulate a few
+hundred control samples by the time generation finishes - enough to
+finally answer, with real (not selection-biased) data, whether the 0.68
+threshold is well-calibrated, too conservative (control samples rarely
+improve, meaning many low-confidence retries below it are also probably
+wasted), or too lax (control samples improve about as often as genuine
+sub-threshold retries do, meaning the threshold should be raised).
+
 *(Log continues below as further tests complete.)*

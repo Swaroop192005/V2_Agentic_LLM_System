@@ -79,6 +79,12 @@ LOG_PATH = ROOT / "training_log_v2.txt"
 # net out faster than 2x parallel throughput interrupted every half hour.
 CONCURRENCY = 1
 
+# Control-group probability for threshold validation (see process_question).
+# Chosen small enough not to meaningfully slow the main 5000-question run
+# (extra attempt on ~8% of already-passing questions) while still building a
+# few hundred control samples over the remaining run.
+CONTROL_REGEN_PROBABILITY = 0.08
+
 
 def init_db(conn: sqlite3.Connection) -> None:
     factor_cols = []
@@ -109,12 +115,18 @@ def init_db(conn: sqlite3.Connection) -> None:
             wikipedia_score REAL, wikipedia_source TEXT,
             wikidata_score REAL, wikidata_source TEXT,
             weighted_score REAL,
+            regen_reason TEXT,
             final_answer TEXT,
             elapsed_secs REAL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pr_question ON pipeline_runs(question)")
+    # Migration for a pre-existing db from before regen_reason existed.
+    try:
+        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN regen_reason TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
 
 
@@ -238,7 +250,8 @@ async def run_one_attempt(query: str, rag_context: str = "") -> dict:
 
 
 def insert_attempt(conn: sqlite3.Connection, question_idx: int, question: str,
-                    attempt_number: int, is_final: bool, r: dict, final_answer: str | None) -> None:
+                    attempt_number: int, is_final: bool, r: dict, final_answer: str | None,
+                    regen_reason: str | None = None) -> None:
     vp, jp = r["verifier_parsed"], r["judge_parsed"]
     cols = ["question_idx", "question", "attempt_number", "is_final_attempt",
             "answer_a", "answer_b", "model_a", "model_b", "verifier_raw", "judge_raw"]
@@ -255,13 +268,13 @@ def insert_attempt(conn: sqlite3.Connection, question_idx: int, question: str,
     cols += ["winner", "sem_sim_a", "sem_sim_b", "length_score_a", "length_score_b",
              "word_count_a", "word_count_b", "model_agreement", "verifier_judge_agreement",
              "wikipedia_score", "wikipedia_source", "wikidata_score", "wikidata_source",
-             "weighted_score", "final_answer", "elapsed_secs", "created_at"]
+             "weighted_score", "regen_reason", "final_answer", "elapsed_secs", "created_at"]
     vals += [r["winner"], r["scores_a"]["semantic_similarity"], r["scores_b"]["semantic_similarity"],
               r["scores_a"]["length_score"], r["scores_b"]["length_score"],
               r["scores_a"]["word_count"], r["scores_b"]["word_count"],
               r["model_agreement"], r["verifier_judge_agreement"],
               r["wikipedia_score"], r["wikipedia_source"], r["wikidata_score"], r["wikidata_source"],
-              r["weighted_score"], final_answer, r["elapsed_secs"], datetime.now().isoformat()]
+              r["weighted_score"], regen_reason, final_answer, r["elapsed_secs"], datetime.now().isoformat()]
 
     placeholders = ",".join(["?"] * len(vals))
     conn.execute(f"INSERT INTO pipeline_runs ({','.join(cols)}) VALUES ({placeholders})", vals)
@@ -279,9 +292,23 @@ async def process_question(idx: int, question: str, conn: sqlite3.Connection, se
             if best is None or r["weighted_score"] > best["weighted_score"]:
                 best = r
                 best_attempt_number = attempt
-            insert_attempt(conn, idx, question, attempt, is_final=False, r=r, final_answer=None)
 
-            if r["weighted_score"] >= DEFAULT_THRESHOLD or attempt > MAX_REGENERATION_ATTEMPTS:
+            needs_regen = r["weighted_score"] < DEFAULT_THRESHOLD
+            # Control group for threshold validation (RESEARCH_LOG.md Section 20):
+            # the real regeneration threshold can only be evaluated on data BELOW
+            # it (that's the only case that ever gets a 2nd attempt), which is a
+            # selection-bias/censored-data problem. Occasionally force a 2nd
+            # attempt on an already-passing 1st attempt too, so we have a genuine
+            # control sample to compare retry-improvement rates against.
+            is_control = (not needs_regen) and attempt == 1 and random.random() < CONTROL_REGEN_PROBABILITY
+            regen_reason = "low_confidence" if needs_regen else ("control_sample" if is_control else None)
+
+            insert_attempt(conn, idx, question, attempt, is_final=False, r=r, final_answer=None,
+                            regen_reason=regen_reason)
+
+            if attempt > MAX_REGENERATION_ATTEMPTS:
+                break
+            if not needs_regen and not is_control:
                 break
 
         # Combiner runs once, on the best attempt
