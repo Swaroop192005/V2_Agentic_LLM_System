@@ -795,4 +795,31 @@ improve, meaning many low-confidence retries below it are also probably
 wasted), or too lax (control samples improve about as often as genuine
 sub-threshold retries do, meaning the threshold should be raised).
 
+## 22. First control-group read: 0.75 looks better than 0.68 (n still small)
+
+With 53 control samples accumulated (Section 21's mechanism), ran the
+first genuinely unbiased comparison of retry-improvement rates:
+
+| Group | n | Retry improves other signals (judge excluded) |
+|---|---|---|
+| Genuine sub-threshold (score < 0.68) | 144 | 66.7% |
+| Control sample, score 0.68-0.75 | 31 | 64.5% |
+| Control sample, score 0.75+ | 22 | 40.9% |
+
+The 0.68-0.75 band behaves almost identically to genuine sub-threshold
+cases (64.5% vs 66.7%) - these are "passing" answers nearly as improvable
+as ones already flagged for regeneration. The 0.75+ band drops sharply to
+40.9%, looking like a genuinely settled "good enough" zone. This is clean,
+monotonic, first-time-unbiased evidence that **0.75 would be a better
+DEFAULT_THRESHOLD than the current 0.68** - right now the pipeline ships
+a meaningful fraction of still-improvable answers without a second look
+purely because they cleared an apparently-too-low bar.
+
+**Not yet acted on.** n=31/n=22 per band is small (~±17pp margin of error
+at 95% CI) - directionally convincing but not yet a safe basis to change
+the live threshold. Decision: let the control-group mechanism keep
+running (~200 more expected by the time the 5000-question run finishes)
+and re-check before committing to 0.75. If the gap holds up at n~150-250
+per band, this becomes a strong, well-supported case for the change.
+
 *(Log continues below as further tests complete.)*
