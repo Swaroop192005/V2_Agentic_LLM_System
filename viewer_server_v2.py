@@ -13,7 +13,7 @@ import sqlite3
 import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 PORT = 7790
@@ -162,7 +162,13 @@ def main():
     if not os.path.exists(DB_PATH):
         print(f"Database not found yet: {DB_PATH} (will appear once generation starts writing)")
 
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    # ThreadingHTTPServer (not plain HTTPServer): the generator writes to the
+    # SQLite DB constantly, so any single query that has to wait on a write
+    # lock would otherwise block every other request behind it - a public
+    # tunnel makes this worse by adding more concurrent hits. Each request
+    # now gets its own thread/connection so one slow query can't wedge the
+    # whole viewer.
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     url = f"http://localhost:{PORT}"
     print(f"\n  v2 Dataset Generation Progress Viewer")
     print(f"  -----------------------------------------")
