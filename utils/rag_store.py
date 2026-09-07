@@ -39,12 +39,65 @@ def init_rag_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # RAG retrieval logging (RESEARCH_LOG.md Section 25): MIN_SIMILARITY
+        # was never calibrated because nothing recorded retrieval decisions
+        # anywhere persistent - the batch generator never even calls
+        # retrieve_context(). This table logs EVERY candidate chunk's raw
+        # similarity for every live-demo query, gated or not, so a future
+        # threshold sweep (mirroring training/threshold_weight_sweep.py) can
+        # replay "what would have passed at cutoff X" without needing to
+        # regenerate anything - same raw-signals-first philosophy as
+        # generate_training_data_v2.py (Section 5).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rag_retrieval_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT,
+                query TEXT,
+                doc_name TEXT,
+                chunk_index INTEGER,
+                similarity REAL,
+                min_similarity_at_time REAL,
+                passed_gate INTEGER,
+                final_rank INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # One row per full pipeline run that reaches a confidence score,
+        # so retrieval quality (above) can eventually be correlated against
+        # actual downstream answer quality, not just "did it pass the gate".
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rag_pipeline_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT,
+                query TEXT,
+                use_rag INTEGER,
+                rag_chunks_used INTEGER,
+                weighted_score REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
-    
+
     # Check if default knowledge exists; if empty, populate initial domain knowledge
     _populate_default_knowledge_if_empty()
+
+
+def log_pipeline_outcome(request_id: str, query: str, use_rag: bool, rag_chunks_used: int, weighted_score: float | None) -> None:
+    """Best-effort: record the final confidence score for a pipeline run
+    alongside whether/how much RAG context it used, for the future
+    retrieval-quality-vs-outcome analysis described in RESEARCH_LOG Section 25."""
+    try:
+        conn = sqlite3.connect(str(RAG_DB_PATH))
+        conn.execute(
+            "INSERT INTO rag_pipeline_outcomes (request_id, query, use_rag, rag_chunks_used, weighted_score) VALUES (?, ?, ?, ?, ?)",
+            (request_id, query, int(use_rag), rag_chunks_used, weighted_score),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"[RAG Store Error] failed to log pipeline outcome: {exc}")
 
 
 def chunk_text(text: str, chunk_size: int = 250, overlap: int = 40) -> List[str]:
@@ -148,9 +201,39 @@ def index_document(doc_name: str, content: str | bytes) -> int:
 MIN_SIMILARITY = 0.35
 
 
-def retrieve_context(query: str, top_k: int = 3, min_similarity: float = MIN_SIMILARITY) -> List[Dict[str, Any]]:
+def _log_retrieval(request_id: str | None, query: str, all_scored: List[Dict[str, Any]], min_similarity: float, kept: List[Dict[str, Any]]) -> None:
+    """Best-effort: record every candidate chunk's raw similarity (not just
+    the ones that passed the gate) so a future threshold sweep can replay
+    'what would have passed at cutoff X' - see RESEARCH_LOG Section 25."""
+    kept_keys = {(c["doc_name"], c["chunk_index"]): i + 1 for i, c in enumerate(kept)}
+    try:
+        conn = sqlite3.connect(str(RAG_DB_PATH))
+        conn.executemany(
+            """INSERT INTO rag_retrieval_log
+               (request_id, query, doc_name, chunk_index, similarity, min_similarity_at_time, passed_gate, final_rank)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    request_id, query, c["doc_name"], c["chunk_index"], c["similarity"], min_similarity,
+                    int(c["similarity"] >= min_similarity),
+                    kept_keys.get((c["doc_name"], c["chunk_index"])),
+                )
+                for c in all_scored
+            ],
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"[RAG Store Error] failed to log retrieval: {exc}")
+
+
+def retrieve_context(query: str, top_k: int = 3, min_similarity: float = MIN_SIMILARITY, request_id: str | None = None, log: bool = True) -> List[Dict[str, Any]]:
     """Retrieve up to top-K relevant chunks for a given query, dropping any
-    below min_similarity so irrelevant context is never injected."""
+    below min_similarity so irrelevant context is never injected. Every
+    candidate's raw similarity is logged (pass `log=False` to skip, e.g. for
+    offline analysis scripts that shouldn't pollute the log) regardless of
+    whether it clears the gate, so MIN_SIMILARITY can eventually be
+    calibrated the way DEFAULT_THRESHOLD was (RESEARCH_LOG Section 25)."""
     if not RAG_DB_PATH.exists():
         return []
 
@@ -178,9 +261,14 @@ def retrieve_context(query: str, top_k: int = 3, min_similarity: float = MIN_SIM
                 "similarity": round(sim, 4)
             })
 
-        scored_chunks = [c for c in scored_chunks if c["similarity"] >= min_similarity]
-        scored_chunks.sort(key=lambda x: x["similarity"], reverse=True)
-        return scored_chunks[:top_k]
+        passed = [c for c in scored_chunks if c["similarity"] >= min_similarity]
+        passed.sort(key=lambda x: x["similarity"], reverse=True)
+        kept = passed[:top_k]
+
+        if log:
+            _log_retrieval(request_id, query, scored_chunks, min_similarity, kept)
+
+        return kept
     except Exception as exc:
         print(f"[RAG Store Error] {exc}")
         return []

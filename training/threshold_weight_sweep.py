@@ -47,6 +47,19 @@ from utils.scoring import DEFAULT_WEIGHTS, DEFAULT_THRESHOLD
 DB_PATH = ROOT / "data" / "judge_training_v2.db"
 SIGNAL_KEYS = ["judge", "similarity", "model_agreement", "verifier_judge_agreement", "wikipedia", "wikidata"]
 
+# verifier_judge_agreement is mathematically DERIVED from the judge + verifier
+# totals (compute_agreement() in utils/rubric_parser.py), so it correlates
+# ~0.737 with `judge` in this data - see RESEARCH_LOG.md Section 20. Letting
+# the weight search treat it as a free, independent variable rewards
+# judge-heavy candidates twice (once directly, once via this near-restatement
+# of it), inflating the internal-consistency score without adding real
+# signal. The weight search (and the internal-consistency check it optimizes)
+# must exclude it entirely - not just weight it toward zero, since it would
+# still be evaluated as a held-out TARGET otherwise, which leaks the same
+# circularity back in through the average. Everything else (threshold sweep,
+# regeneration validity) is unaffected and keeps using the full SIGNAL_KEYS.
+INDEPENDENT_KEYS = [k for k in SIGNAL_KEYS if k != "verifier_judge_agreement"]
+
 
 def load_rows() -> list[dict]:
     con = sqlite3.connect(str(DB_PATH))
@@ -78,11 +91,12 @@ def load_rows() -> list[dict]:
     return out
 
 
-def weighted_composite(row: dict, weights: dict, exclude: str | None = None) -> float | None:
+def weighted_composite(row: dict, weights: dict, exclude: str | None = None, keys: list[str] = SIGNAL_KEYS) -> float | None:
     """Mirrors compute_weighted_score's missing-signal renormalization,
-    plus an optional extra excluded signal (for leave-one-out testing)."""
+    plus an optional extra excluded signal (for leave-one-out testing).
+    `keys` restricts which signals participate at all (see INDEPENDENT_KEYS)."""
     available = {
-        k: row[k] for k in SIGNAL_KEYS
+        k: row[k] for k in keys
         if row[k] is not None and k != exclude
     }
     if not available:
@@ -104,15 +118,18 @@ def pearson(xs: list[float], ys: list[float]) -> float:
     return num / (denx * deny)
 
 
-def internal_consistency_score(rows: list[dict], weights: dict) -> float:
-    """Average leave-one-signal-out correlation across all 6 signals."""
+def internal_consistency_score(rows: list[dict], weights: dict, keys: list[str] = SIGNAL_KEYS) -> float:
+    """Average leave-one-signal-out correlation across `keys`. Pass
+    INDEPENDENT_KEYS here (not SIGNAL_KEYS) when weight-sweeping, so
+    verifier_judge_agreement is never used as a held-out target either -
+    see the INDEPENDENT_KEYS comment above for why."""
     correlations = []
-    for held_out in SIGNAL_KEYS:
+    for held_out in keys:
         xs, ys = [], []
         for row in rows:
             if row[held_out] is None:
                 continue
-            composite = weighted_composite(row, weights, exclude=held_out)
+            composite = weighted_composite(row, weights, exclude=held_out, keys=keys)
             if composite is None:
                 continue
             xs.append(composite)
@@ -123,16 +140,24 @@ def internal_consistency_score(rows: list[dict], weights: dict) -> float:
 
 
 def random_weight_vector() -> dict:
-    """Dirichlet-like random weights summing to 1 across the 6 signals."""
-    raw = [random.random() ** 1.5 for _ in SIGNAL_KEYS]  # power skews toward sparser vectors
+    """Dirichlet-like random weights summing to 1 across the 5 INDEPENDENT
+    signals - verifier_judge_agreement is deliberately never a free variable
+    here (see INDEPENDENT_KEYS)."""
+    raw = [random.random() ** 1.5 for _ in INDEPENDENT_KEYS]  # power skews toward sparser vectors
     total = sum(raw)
-    return {k: v / total for k, v in zip(SIGNAL_KEYS, raw)}
+    return {k: v / total for k, v in zip(INDEPENDENT_KEYS, raw)}
 
 
 def sweep_weights(rows: list[dict], n_candidates: int = 3000) -> list[tuple[float, dict]]:
     random.seed(42)
-    candidates = [DEFAULT_WEIGHTS] + [random_weight_vector() for _ in range(n_candidates)]
-    scored = [(internal_consistency_score(rows, w), w) for w in candidates]
+    # Renormalize DEFAULT_WEIGHTS over the 5 independent keys so the baseline
+    # is scored on the same footing as the candidates (same keys, weights
+    # rescaled to sum to 1), rather than leaking a 6th free signal into only
+    # one side of the comparison.
+    default_wsum = sum(DEFAULT_WEIGHTS[k] for k in INDEPENDENT_KEYS)
+    default_renorm = {k: DEFAULT_WEIGHTS[k] / default_wsum for k in INDEPENDENT_KEYS}
+    candidates = [default_renorm] + [random_weight_vector() for _ in range(n_candidates)]
+    scored = [(internal_consistency_score(rows, w, keys=INDEPENDENT_KEYS), w) for w in candidates]
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored
 
@@ -206,11 +231,15 @@ def main():
 
     print("=" * 70)
     print("WEIGHT SWEEP (3000 random candidates + current default)")
+    print(f"verifier_judge_agreement excluded from the free search - it's derived")
+    print(f"from judge+verifier totals, not an independent signal (RESEARCH_LOG Sec 20)")
     print("=" * 70, flush=True)
     ranked = sweep_weights(rows)
-    default_score = internal_consistency_score(rows, DEFAULT_WEIGHTS)
+    default_wsum = sum(DEFAULT_WEIGHTS[k] for k in INDEPENDENT_KEYS)
+    default_renorm = {k: round(DEFAULT_WEIGHTS[k] / default_wsum, 4) for k in INDEPENDENT_KEYS}
+    default_score = internal_consistency_score(rows, default_renorm, keys=INDEPENDENT_KEYS)
     print(f"Current DEFAULT_WEIGHTS internal-consistency score: {default_score:.4f}")
-    print(f"  {DEFAULT_WEIGHTS}\n")
+    print(f"  (renormalized over the 5 independent signals: {default_renorm})\n")
 
     print("Top 5 candidates found:")
     for score, w in ranked[:5]:

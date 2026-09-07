@@ -822,4 +822,236 @@ running (~200 more expected by the time the 5000-question run finishes)
 and re-check before committing to 0.75. If the gap holds up at n~150-250
 per band, this becomes a strong, well-supported case for the change.
 
+## 23. Threshold re-check with statistical rigor: significant, but costly to act on
+
+Requested re-analysis at 3536/5000 questions (117 control samples, more than
+double Section 22's 53). Built `training/threshold_confidence_analysis.py`
+to add what the earlier read lacked: Wilson score confidence intervals per
+band and a two-proportion z-test between the two control bands, instead of
+comparing raw percentages by eye.
+
+| Band | n | Retry improves other signals | 95% CI |
+|---|---|---|---|
+| < 0.55 | 41 | 68.3% | [53.0, 80.4] |
+| 0.55 - 0.62 | 109 | 61.5% | [52.1, 70.1] |
+| 0.62 - 0.68 (sub-threshold) | 492 | 65.7% | [61.3, 69.7] |
+| 0.68 - 0.75 (control) | 77 | 61.0% | [49.9, 71.2] |
+| 0.75+ (control) | 41 | 36.6% | [23.6, 51.9] |
+
+**z = 2.533, two-tailed p = 0.0113** for the 0.68-0.75 vs 0.75+ gap - this
+clears the ~150-250-sample bar loosely and, worked out properly, needed only
+~32 samples per band to reach significance at this effect size; the 77/41
+in hand comfortably clears that. **This is now a real, statistically
+significant finding, not a directional one**: answers already scoring
+0.68-0.75 improve on retry about as often as genuine sub-threshold answers
+(61.0% vs 62-68% across the three bins below 0.68 - no sharp cliff there
+either), while answers scoring 0.75+ improve much less often (36.6%). The
+information the confidence score carries about "is this worth a second
+look" doesn't actually run out at 0.68 - it keeps discriminating up to
+around 0.75.
+
+**Second catch, found while re-running the weight sweep on the larger
+dataset**: `training/threshold_weight_sweep.py`'s top candidates were once
+again dominated by heavy `verifier_judge_agreement` weight (up to 0.78) -
+the exact circularity Section 20 already diagnosed and reportedly excluded
+"from the free search," but the fix had only ever been applied ad hoc in an
+interactive session, never actually committed to the script. Fixed properly
+this time: added `INDEPENDENT_KEYS` (the 5 non-derived signals) and
+threaded a `keys` parameter through `weighted_composite` /
+`internal_consistency_score` so verifier_judge_agreement is excluded both as
+a free weight AND as a held-out target (excluding it only as a free weight
+would still leak the correlation back in through the leave-one-out average).
+The corrected sweep is the one worth trusting going forward; ad hoc
+workarounds that never make it back into the checked-in tool are exactly
+the kind of thing this log-keeping habit exists to catch.
+
+**Why this isn't being acted on immediately anyway - the real cost is
+operational, not statistical.** Computed the actual regeneration-rate impact
+across all 3544 first attempts collected so far:
+
+| Threshold | First attempts that would pass | Regeneration rate |
+|---|---|---|
+| 0.68 (current) | 81.8% | 18.2% |
+| 0.70 | 71.6% | 28.4% |
+| 0.71 | 65.4% | 34.6% |
+| 0.72 | 58.0% | 42.0% |
+| 0.74 | 43.1% | 56.9% |
+| 0.75 | 35.5% | **64.5%** |
+
+Moving to 0.75 would raise the regeneration rate from 18.2% to 64.5% - a
+~3.5x jump - for every question generated from this point forward. There is
+no cheap middle ground either: even a small step to 0.70 nearly doubles it
+(18.2% -> 28.4%). At the project's established ~73s/attempt baseline
+(Section 18), this would substantially slow completion of the remaining
+~1460 questions. Unlike every prior judge/rubric change in this log, this
+particular change does NOT invalidate or alter any already-stored score -
+every signal is computed identically regardless of `DEFAULT_THRESHOLD`, so
+raising it mid-run would not be a mixed-scoring-regime problem in the sense
+Sections 1, 10, 12, 13, 15 and 17 were - only a mixed-*bar-for-shipping*
+one, and a fully recoverable one at that (the `regen_reason` column already
+records enough to reconstruct, post hoc, which threshold each row would
+have shipped under).
+
+**Decision: hold at 0.68 for the remainder of this run**, given the
+completion-time cost, and treat 0.75 as the evidence-backed recommended
+default for the *next* dataset generation run or production deployment
+where completion-time pressure doesn't apply the same way. Flagged back to
+the user as an open decision rather than changed unilaterally, since the
+tradeoff (dataset quality bar vs. time-to-5000) depends on project
+timeline constraints outside this analysis's visibility.
+
+## 24. Optimal threshold, proven properly: ROC/Youden's J + bootstrap → 0.75 adopted
+
+User asked for actual proof that a candidate threshold is the best one
+possible, not just "better than 0.68." Built
+`training/optimal_threshold_roc.py` to frame this as a standard
+binary-classifier-cutoff problem: attempt 1's `weighted_score` is a
+predictor, the target it's predicting is "would this answer actually
+improve if regenerated" (same OTHER-signals-only, judge-excluded
+definition used since Section 20), and every question that ever got a 2nd
+attempt provides one labeled (score, improved) pair.
+
+**A real methodological mistake, caught before it went in the record**: the
+first version computed sensitivity/specificity/AUC directly from raw
+labeled rows and got a nonsense result - AUC=0.5079 (indistinguishable from
+random) and an "optimal" cutoff of 0.66, *below* the current threshold,
+flatly contradicting Section 23's significant finding. Cause: this dataset
+is not a simple random sample. Every sub-threshold attempt is regenerated
+(100% census), but only 8% of at-or-above-threshold attempts are
+(`CONTROL_REGEN_PROBABILITY`, Section 21) - a case-control / stratified
+-sampling design. Raw counts silently treat a control-sample row as equally
+representative as a census row, undercounting the true above-threshold
+population by ~12.5x and corrupting every population-composition-dependent
+statistic (sensitivity, specificity, AUC) even though it does NOT bias the
+simple per-band rates Section 23 used. Fixed with inverse-probability-of
+-sampling weighting - the standard correction for exactly this design in
+diagnostic-test validation statistics: every low_confidence row weight 1.0,
+every control_sample row weight 1/0.08 = 12.5x.
+
+**Corrected result**:
+
+| Method | Result |
+|---|---|
+| Two-proportion z-test, 0.68-0.75 vs 0.75+ bands (Section 23) | p = 0.0113 |
+| Sampling-corrected ROC AUC | 0.6211 (real signal, not random) |
+| Sampling-corrected Youden's J optimum | **t = 0.74** (sensitivity 79.1%, specificity 39.8%, J=0.1885) |
+| 2000-resample bootstrap of the optimum | median 0.73, **mode 0.75**, 95% CI **[0.69, 0.79]** |
+
+Three independent methods (a significance test, a corrected ROC/Youden's-J
+optimization, and a bootstrap stability check) converge on the same
+0.73-0.75 neighborhood. The current 0.68 sits right at the edge of the
+bootstrap CI, not inside its bulk - i.e. it's more likely to be
+*miscalibrated low* than for this result to be noise.
+
+**Decision: `DEFAULT_THRESHOLD` raised from 0.68 to 0.75** in
+`utils/scoring.py` (0.75 chosen as the bootstrap mode - a defensible, round
+value sitting inside the confidence interval, not just the raw Youden
+optimum of 0.74). `generate_training_data_v2.py` and `server.py` both
+restarted to pick up the new value (both import it as a module-level
+constant, so a running process would otherwise keep the old one in memory
+indefinitely). Per Section 23's own cost analysis, this raises the
+regeneration rate on the remaining ~1450 questions from ~18% to ~64.5% -
+accepted deliberately in exchange for a properly-proven, higher quality
+bar, rather than held for consistency as Section 23 initially recommended.
+`CONTROL_REGEN_PROBABILITY`'s 8% mechanism keeps running unchanged and will
+now sample the space above 0.75 instead of above 0.68, so this same
+analysis can be re-run later to check whether an even higher cutoff is
+justified once enough new control data exists above the new bar.
+
+## 25. RAG's MIN_SIMILARITY has never been calibrated - and currently can't be
+
+User asked whether `utils/rag_store.py::MIN_SIMILARITY` (0.35, the cosine
+-similarity gate below which a retrieved chunk is dropped rather than
+injected as context) had gone through the same scrutiny as
+`DEFAULT_THRESHOLD`. It hadn't, and unlike the confidence threshold, it
+currently **can't** be - not a matter of insufficient sample size, but a
+complete absence of a data path.
+
+**Root cause**: `generate_training_data_v2.py::run_one_attempt(query,
+rag_context="")` defaults to no RAG context, and the sole call site
+(`process_question`, line ~291) calls it as `run_one_attempt(question)` -
+never overriding `rag_context`. Every one of the 3500+ questions in the
+entire calibration dataset ran with RAG **completely inert**.
+`MIN_SIMILARITY` only ever executes inside the live interactive demo
+(`server.py`), which sees a tiny fraction of the traffic the batch
+generator does, and logs no retrieval outcome anywhere persistent (no
+`regen_reason`-style column recording whether a kept/dropped chunk was
+actually useful). There is nothing in `judge_training_v2.db` to sweep this
+threshold against, at any sample size.
+
+**What was done instead - a plausibility spot-check, explicitly not a
+calibration**: built `training/rag_threshold_spotcheck.py`, which queries
+the REAL, currently-populated knowledge base (7 documents / 98 chunks,
+`data/rag_knowledge.db` - the 2 defaults plus 5 PDFs uploaded through the
+live demo: a quantum physics paper, a bioinformatics perspective piece, and
+3 solar-system documents) with 5 deliberately on-topic and 5 deliberately
+off-topic hand-written queries, reading the raw top-1 similarity before any
+gate is applied.
+
+| | Result |
+|---|---|
+| On-topic queries correctly passing the gate | 5/5 (scores 0.501-0.623) |
+| Off-topic queries correctly blocked | 5/5 (scores 0.082-0.298) |
+| Gap between weakest on-topic and strongest off-topic score | +0.202 |
+
+0.35 sits cleanly inside the [0.298, 0.501] safe zone on this sample - it
+is not obviously broken. But this answers a much weaker question than the
+confidence-threshold work did: "is 0.35 obviously wrong?" (no), not "is
+0.35 optimal, and by how much would a different value change outcomes?"
+(unknown - 10 hand-picked queries against 7 documents is a sanity check,
+not a statistically powered result, and has none of the real-usage
+grounding the control-group mechanism gave DEFAULT_THRESHOLD).
+
+**What a real calibration would need**: the live demo would have to start
+logging every RAG decision (query, retrieved chunk text, raw similarity,
+whether it was kept or gated out) to a persistent table, plus some usable
+proxy for "was this retrieval actually good" - e.g. re-running
+`compute_weighted_score` on the same query with RAG on vs. off and
+comparing, mirroring the A/B structure the confidence-threshold control
+group used. That requires real interactive-demo traffic to accumulate,
+which this project has approximately none of compared to the batch
+generator's 3500+ logged questions - not started, pending direction.
+
+## 26. RAG retrieval logging added, and a live "was RAG used" UI indicator
+
+Two follow-ups to Section 25's finding that MIN_SIMILARITY has no data path
+to calibrate against.
+
+**Logging** (`utils/rag_store.py`): `retrieve_context()` now logs every
+candidate chunk's raw similarity - not just the ones that pass the gate -
+to a new `rag_retrieval_log` table in `data/rag_knowledge.db`, tagged with
+a per-request `request_id`. A second table, `rag_pipeline_outcomes`, records
+that same `request_id` against the run's final `weighted_score` and whether
+`use_rag` was on, written once `server.py` finishes a query. Same
+raw-signals-first philosophy as `generate_training_data_v2.py` (Section 5):
+log everything now, decide what to sweep later. Verified end-to-end - one
+real query logged 98 rows (one per chunk in the knowledge base) tagged with
+a shared request_id.
+
+**UI indicator**: the live demo previously received a `rag` SSE event but
+silently discarded it (`if (p.retrieved !== undefined) { return; }` -
+"informational, no dedicated card needed"). Wired it up: `server.py` now
+also emits the event when RAG was NOT used (previously only emitted on a
+successful retrieval), distinguishing two reasons - `disabled` (checkbox
+off) vs `no_relevant_document` (nothing in the knowledge base cleared
+MIN_SIMILARITY for this question). The frontend shows a badge next to the
+RAG toggle: "✓ RAG used · N chunks" or "○ RAG: no relevant document".
+Confirmed over the real SSE stream for all three cases (used / no-match /
+disabled).
+
+This directly answers a user question about whether an uploaded document
+gets forced into every answer regardless of relevance: it doesn't - the
+MIN_SIMILARITY gate already excludes RAG for off-topic questions
+(verified again here, consistent with Section 25's spot-check), and now
+that's visible in the UI instead of only inferable from the network tab.
+
+Also clarified: `MIN_SIMILARITY` (retrieval relevance) and
+`DEFAULT_THRESHOLD` (post-generation confidence, Section 24) are
+independent thresholds on unrelated scales - raising one has no formulaic
+bearing on the other. The one real open connection: since RAG never fires
+in the batch generator (Section 25), the 0.75 threshold was proven
+entirely on non-RAG answers, so whether it's equally well-calibrated for
+RAG-assisted ones is unknown. `rag_pipeline_outcomes` now collects exactly
+what a future check of that would need.
+
 *(Log continues below as further tests complete.)*

@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import random
 import time
+import uuid
 import asyncio
 import traceback
 from contextlib import asynccontextmanager
@@ -54,7 +55,7 @@ from agents.judge_agent import create_judge_agent, build_judge_prompt
 from agents.combiner_agent import create_combiner_agent, build_combiner_prompt
 from utils.similarity import score_response
 from utils.context_store import init_db, save_query, get_all_context_records, build_context_prefix, clear_context
-from utils.rag_store import init_rag_db, retrieve_context, index_document, get_rag_stats
+from utils.rag_store import init_rag_db, retrieve_context, index_document, get_rag_stats, log_pipeline_outcome
 from utils.rubric_parser import parse_judge_scores, parse_rubric_scores, compute_agreement, remap_ab
 from utils.scoring import compute_weighted_score, needs_regeneration, DEFAULT_THRESHOLD, MAX_REGENERATION_ATTEMPTS
 from utils.eval_metrics import compute_bertscore_batch
@@ -209,6 +210,10 @@ async def _run_pipeline_sse(query: str, use_rag: bool = True) -> AsyncIterator[d
     """
     loop = asyncio.get_running_loop()
     t_start = time.time()
+    # Ties this run's rag_retrieval_log rows to its eventual confidence score
+    # in rag_pipeline_outcomes, so retrieval quality can later be correlated
+    # against actual answer quality (RESEARCH_LOG Section 25).
+    request_id = uuid.uuid4().hex[:12]
 
     def _emit(event: str, data: dict) -> dict:
         return {"event": event, "data": json.dumps(data)}
@@ -221,8 +226,12 @@ async def _run_pipeline_sse(query: str, use_rag: bool = True) -> AsyncIterator[d
 
         # ── RAG Vector Retrieval (Optional / Auto) ─────────────────────────
         rag_prompt_prefix = ""
+        rag_chunks_used = 0
         if use_rag:
-            rag_chunks = await loop.run_in_executor(None, retrieve_context, query, 3)
+            rag_chunks = await loop.run_in_executor(
+                None, lambda: retrieve_context(query, top_k=3, request_id=request_id)
+            )
+            rag_chunks_used = len(rag_chunks)
             if rag_chunks:
                 yield _emit("rag", {"retrieved": True, "count": len(rag_chunks), "chunks": rag_chunks})
                 formatted_docs = "\n\n".join([f"[{c['doc_name']} (score: {c['similarity']})]:\n{c['content']}" for c in rag_chunks])
@@ -232,6 +241,13 @@ async def _run_pipeline_sse(query: str, use_rag: bool = True) -> AsyncIterator[d
                     f"-------------------------------------------------------\n\n"
                     f"Use the verified context documents above to inform and ground your response accurately.\n\n"
                 )
+            else:
+                # Nothing in the knowledge base cleared MIN_SIMILARITY for this
+                # question - answer without RAG rather than inject a tangential
+                # document as if it were ground truth (see utils/rag_store.py).
+                yield _emit("rag", {"retrieved": False, "count": 0, "reason": "no_relevant_document"})
+        else:
+            yield _emit("rag", {"retrieved": False, "count": 0, "reason": "disabled"})
 
         # Initialise all agents (fast — just object creation)
         llama3_agent   = create_llama3_agent()
@@ -397,6 +413,10 @@ async def _run_pipeline_sse(query: str, use_rag: bool = True) -> AsyncIterator[d
         # Use whichever attempt scored highest (usually the last one, unless a retry regressed)
         answer1, answer2 = best_attempt["answer1"], best_attempt["answer2"]
         verification, judgement = best_attempt["verification"], best_attempt["judgement"]
+
+        await loop.run_in_executor(
+            None, log_pipeline_outcome, request_id, query, use_rag, rag_chunks_used, best_attempt["score"]
+        )
 
         # ── Stage 6: Combiner ────────────────────────────────────────────────
         yield _emit("stage", {"stage": 6, "name": "Combiner", "status": "running"})

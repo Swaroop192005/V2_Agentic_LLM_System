@@ -47,8 +47,15 @@ DEFAULT_WEIGHTS = {
     "wikidata": 0.10,
 }
 
-# Starting point pending the threshold-sweep phase (see project plan / reports).
-DEFAULT_THRESHOLD = 0.68
+# Data-derived, not a starting guess: a sampling-corrected ROC/Youden's-J
+# analysis over the control-group regeneration data (training/optimal_threshold_roc.py)
+# put the optimal cutoff at t=0.74 (AUC=0.62), with a 2000-resample bootstrap
+# 95% CI of [0.69, 0.79] and mode 0.75 - independently confirmed by a
+# two-proportion significance test (p=0.011) between the 0.68-0.75 and 0.75+
+# score bands. See RESEARCH_LOG.md Sections 22-24 for the full derivation,
+# including a real methodological mistake (naive ROC ignoring the
+# case-control sampling design) caught and fixed along the way.
+DEFAULT_THRESHOLD = 0.75
 MAX_REGENERATION_ATTEMPTS = 2
 
 

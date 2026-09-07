@@ -40,6 +40,7 @@ const drawer          = document.getElementById('drawer');
 const drawerOverlay   = document.getElementById('drawer-overlay');
 const ctxRecords      = document.getElementById('ctx-records');
 const ctxBadge        = document.getElementById('ctx-badge');
+const ragRunBadge     = document.getElementById('rag-run-badge');
 const ctxCloseBtn     = document.getElementById('ctx-close-btn');
 const ctxClearBtn     = document.getElementById('ctx-clear-btn');
 
@@ -381,6 +382,7 @@ function resetUI() {
   timerDisplay.classList.remove('visible');
   timerDisplay.textContent = '';
   confidenceCard.classList.remove('visible');
+  ragRunBadge.style.display = 'none';
   hideRegenerating();
   buildRail();
   STAGES.forEach(s => setNodeState(s.id, ''));
@@ -453,8 +455,21 @@ function handleEvent(p) {
     return;
   }
 
-  // RAG chunks retrieved — informational, no dedicated card needed beyond console
+  // RAG chunks retrieved (or not) for this run — shows whether the answer is
+  // actually grounded in an uploaded document vs. answered with no RAG
+  // influence (e.g. the question didn't match anything relevant).
   if (p.retrieved !== undefined) {
+    if (p.reason === 'disabled') {
+      ragRunBadge.style.display = 'none';
+    } else if (p.retrieved) {
+      ragRunBadge.textContent = `✓ RAG used · ${p.count} chunk${p.count === 1 ? '' : 's'}`;
+      ragRunBadge.className = 'rag-status-badge used';
+      ragRunBadge.style.display = 'inline-flex';
+    } else {
+      ragRunBadge.textContent = '○ RAG: no relevant document';
+      ragRunBadge.className = 'rag-status-badge none';
+      ragRunBadge.style.display = 'inline-flex';
+    }
     return;
   }
 

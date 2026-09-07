@@ -30,6 +30,7 @@
           <input type="checkbox" id="rag-checkbox" checked />
           📚 RAG Mode
         </label>
+        <span class="rag-status-badge" id="rag-run-badge" style="display:none"></span>
         <button class="pill" id="rag-upload-btn" onclick="document.getElementById('rag-file-input').click()">📎 Upload Docs</button>
         <input type="file" id="rag-file-input" style="display:none" accept=".pdf,.txt,.md,.json,.py" multiple onchange="uploadRagDocs(this)" />
         <button class="pill" id="context-btn">🗄️ Context <span class="pill-badge" id="ctx-badge" style="display:none">0</span></button>

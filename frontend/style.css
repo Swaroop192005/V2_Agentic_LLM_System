@@ -103,6 +103,15 @@ body {
   font-size: 0.68rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
 }
 
+/* Per-run RAG usage indicator (was this query's answer actually grounded in
+   a retrieved document, or answered with no RAG influence?) */
+.rag-status-badge {
+  font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.rag-status-badge.used { background: rgba(55,255,139,0.14); color: var(--green); border: 1px solid rgba(55,255,139,0.35); }
+.rag-status-badge.none { background: var(--panel-2); color: var(--text-faint); border: 1px solid var(--line); }
+
 /* ── Health strip ───────────────────────────────────────────────────── */
 .health { display: flex; align-items: center; gap: 9px; padding: 10px 16px; border-radius: var(--radius-sm);
   background: var(--panel); border: 1px solid var(--line); font-size: 0.83rem; color: var(--text-dim); margin-bottom: 28px; }
