@@ -1124,4 +1124,137 @@ threshold living in two places (the scoring code and a UI's display logic)
 needs both updated together - worth checking for other such copies before
 the next threshold change.
 
+## 29. Is the pipeline Mistral-biased? A real, pre-existing, modest edge - separable from a bigger position artifact
+
+Direct user question, answered with data rather than assumption
+(n=4,091 final answers, current position-randomized regime):
+
+| | LLaMA 3 | Mistral |
+|---|---|---|
+| By raw position (A vs B) | 35.2% | 64.8% |
+| By true model identity | 44.7% | 55.3% |
+
+Both gaps are real (z~6.8 and z~18.9 respectively against a 50/50 null -
+not noise at this n). A proper 2x2 cross-tab (win rate for each model
+WITHIN the same position) separates them cleanly:
+
+| | Position A | Position B |
+|---|---|---|
+| LLaMA3 there | 29.3% (n=1993) | 59.3% (n=2100) |
+| Mistral there | 40.7% (n=2100) | 70.7% (n=1993) |
+
+Mistral outperforms LLaMA3 by ~11 points in EITHER slot - not explained by
+lucky positioning. Ruled out length (Mistral answers are actually shorter,
+313 vs 361 words) and topical relevance (LLaMA3 is slightly MORE similar
+to the question, 0.760 vs 0.733) as explanations.
+
+**Per-criterion localization**: the Judge's gap concentrates almost
+entirely in three related criteria - Factual Correctness (+0.56/10),
+Faithfulness (+0.49), Hallucination-Free (+0.35) - while Clarity,
+Completeness, and Relevance show near-zero gap. Looked like a real,
+specific "Mistral is judged more factually sound" finding.
+
+**Then contradicted by the Verifier**: phi3 scores the SAME answer pairs
+independently, and shows NO gap on any criterion (all ±0.03 or less).
+Two live explanations, not yet resolved: (a) the Judge's factual
+-correctness read is a style-driven illusion specific to qwen3.5:9b, or
+(b) the Verifier's known near-ceiling clustering (Section 18, still
+untested) makes it unable to detect a real gap either way. Recommended
+next step (not yet run): give the Verifier the same deliberately-broken
+-vs-solid discrimination test from Section 9, to check if it can detect
+ANY real quality gap at all.
+
+**Is this new (started "yesterday")?** No - checked directly:
+
+| | LLaMA3 | Mistral |
+|---|---|---|
+| Before the 0.75 threshold change | 45.6% | 54.4% (n=3556) |
+| After the 0.75 threshold change | 38.9% | 61.1% (n=548) |
+
+The edge pre-dates the threshold change and was already significant at
+n=3556. It looks bigger now mainly because regenerated (best-of-2/3)
+answers have ALWAYS shown a slightly bigger Mistral edge than single-shot
+ones (58.1% vs 54.4%, consistent pre- and post-change), and the threshold
+change shifted the dataset's mix from ~18% regenerated to ~82% regenerated
+- an existing pattern getting more weight, not a new one appearing.
+
+## 30. Viewer bug found via the Mistral-bias investigation: winner names were hardcoded to position, not identity
+
+A user screenshot of `data_viewer_v2.html` showing ~23/24 recent rows won
+by "Mistral" prompted a direct DB check of the exact rows shown. The raw
+data told a different story: e.g. `question_idx=4104` has `model_a=mistral,
+model_b=llama3, winner=B` - the TRUE winner is llama3 - but the viewer
+displayed "Mistral."
+
+**Root cause**: `data_viewer_v2.html` hardcoded `winner === 'A' ? 'LLaMA 3'
+: 'Mistral'` in three places (the recent-attempts table, the detail
+modal's meta line, AND the detail modal's answer-column titles - meaning
+the actual answer TEXT was mislabeled with the wrong model's name too).
+This assumption was true before Section 17's position-randomization fix
+(LLaMA3 was unconditionally position A back then) and was never updated
+once position started being assigned per-question by coin flip - a
+"the fix was applied to the scoring path but not the display path" gap
+that's existed since Section 17 shipped.
+
+**Practical impact**: this specific screenshot's near-unanimous run
+happened to coincide with a stretch where the coin flip landed
+`model_a=mistral` repeatedly - the true win split in that window was much
+closer to the pipeline's normal 55-60% Mistral rate (confirmed against the
+raw DB), not the ~96% the display suggested. The Section 29 analysis above
+was computed directly from SQL joining `winner` against `model_a`/
+`model_b` correctly throughout, so it is NOT affected by this bug and
+stands as reported - only the VIEWER's on-screen labels were wrong.
+
+**Fix**: `viewer_server_v2.py` now computes true-identity win counts
+(`wins_llama3`/`wins_mistral`) alongside the old position-only ones, and
+`get_recent()` now returns `model_a`/`model_b` per row. `data_viewer_v2.html`
+now derives every displayed model name (table winner, modal winner, BOTH
+answer-column titles, and the aggregate "winner split" stat) from
+`model_a`/`model_b`, never from raw position. Verified against the exact
+row that exposed the bug (`question_idx=4104`) - now correctly shows
+LLaMA3 as winner.
+
+**Process lesson for the record**: this is the second time a fix landed
+in the scoring/generation path but not a downstream display path (the
+first was Section 24/27's threshold value living in two places). Worth a
+standing habit: after any change to `model_a`/`model_b`, `winner`, or
+threshold semantics, grep the viewer files too, not just the pipeline code.
+
+## 31. Verifier discrimination test: it can tell, decisively - the Judge's Mistral edge stands unexplained-away
+
+Direct follow-up to Section 29's open question: does the Verifier's ~0
+LLaMA3-vs-Mistral gap mean "no real difference," or is phi3 just unable to
+detect any quality gap at all (its known near-ceiling clustering,
+Section 18)? Ran the same decisive test Section 9 used on the Judge back
+when qwen2.5/CompassJudger-1 were under investigation -
+`training/verifier_discrimination_test.py`, one genuinely solid vs. one
+deliberately broken (factually wrong, self-contradictory, irrelevant)
+answer per question, same production rubric/prompt:
+
+| Question | Solid | Broken | Gap |
+|---|---|---|---|
+| ML vs. deep learning | 77/80 | 8/80 | +69 |
+| CRISPR-Cas9 gene editing | 80/80 | 0/80 | +80 |
+
+Average gap +74.5/80 - about as decisive as this test can get. **The
+Verifier absolutely can discriminate when there's a real quality gap to
+find.** This settles Section 29's open question: its near-ceiling
+clustering on ordinary (non-broken) answers is a real, separate pattern
+worth its own investigation some day, but it does NOT mean phi3 is
+incapable of registering differences - so its flat ~0 gap between LLaMA3
+and Mistral is a genuine "these two models' answers looked equally good to
+an independent evaluator" reading, not an instrument-sensitivity artifact.
+
+**Net effect on the Mistral-bias question (Section 29)**: the Judge's
+concentrated ~0.5/10 edge on Factual Correctness / Faithfulness /
+Hallucination-Free now looks LESS likely to be real content quality and
+MORE likely a qwen3.5:9b-specific perception (style, phrasing, or some
+other confound) - a second, independent, and now demonstrably sensitive
+evaluator looked at the identical answer pairs and saw nothing. Not fully
+proven either way without a ground-truth fact-check per answer (which
+doesn't exist at this scale), but the balance of evidence shifted
+meaningfully toward "judge artifact" rather than "genuine Mistral
+advantage." Flagged as the leading open question for the next research
+phase, rather than settled.
+
 *(Log continues below as further tests complete.)*

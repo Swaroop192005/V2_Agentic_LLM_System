@@ -47,6 +47,14 @@ def get_progress():
           ROUND(AVG(elapsed_secs), 1)                                         AS avg_elapsed,
           SUM(CASE WHEN is_final_attempt=1 AND winner='A' THEN 1 ELSE 0 END)  AS wins_a,
           SUM(CASE WHEN is_final_attempt=1 AND winner='B' THEN 1 ELSE 0 END)  AS wins_b,
+          -- True model-identity win counts, NOT raw position - position is
+          -- randomized per question (RESEARCH_LOG Section 17), so wins_a/wins_b
+          -- above answer "which SLOT won," not "which MODEL won." The frontend
+          -- was displaying wins_a/wins_b as if they were LLaMA3/Mistral counts,
+          -- which is wrong whenever model_a happened to be mistral - see
+          -- RESEARCH_LOG Section 29/30.
+          SUM(CASE WHEN is_final_attempt=1 AND ((winner='A' AND model_a='llama3') OR (winner='B' AND model_b='llama3')) THEN 1 ELSE 0 END) AS wins_llama3,
+          SUM(CASE WHEN is_final_attempt=1 AND ((winner='A' AND model_a='mistral') OR (winner='B' AND model_b='mistral')) THEN 1 ELSE 0 END) AS wins_mistral,
           MAX(created_at)                                                    AS last_at
         FROM pipeline_runs
         """
@@ -77,6 +85,7 @@ def get_recent(limit=30):
     # user spot-checked a row against the raw DB (RESEARCH_LOG Section 27/28).
     return query_db(
         """SELECT id, question_idx, question, attempt_number, winner, weighted_score,
+                  model_a, model_b,
                   judge_total_a, judge_total_b, verifier_judge_agreement,
                   wikipedia_score, wikidata_score, elapsed_secs, created_at,
                   (SELECT COUNT(*) FROM pipeline_runs p2 WHERE p2.question_idx = pipeline_runs.question_idx) AS total_attempts

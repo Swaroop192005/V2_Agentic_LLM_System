@@ -49,8 +49,11 @@
   tbody tr.flash { animation: flash 1.2s ease; }
   @keyframes flash { 0% { background: rgba(0,240,255,0.18); } 100% { background: transparent; } }
   .q-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-  .win-a { color: var(--cyan); font-weight: 700; }
-  .win-b { color: var(--violet); font-weight: 700; }
+  /* Keyed to true model identity (model_a/model_b), NOT raw position - position
+     is randomized per question, so "A won" doesn't mean the same model each
+     time (see RESEARCH_LOG Section 29/30). */
+  .win-llama3 { color: var(--cyan); font-weight: 700; }
+  .win-mistral { color: var(--violet); font-weight: 700; }
   .score-ok { color: var(--green); }
   .score-low { color: var(--gold); }
   .attempt-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; background: var(--panel-2); border: 1px solid var(--line); }
@@ -172,7 +175,9 @@ async function poll() {
     document.getElementById('stat-score').textContent = fmtPct(p.avg_weighted_score);
     document.getElementById('stat-agreement').textContent = fmtPct(p.avg_vj_agreement);
     document.getElementById('stat-elapsed').textContent = p.avg_elapsed ? p.avg_elapsed.toFixed(0) + 's' : '–';
-    document.getElementById('stat-wins').textContent = `${p.wins_a ?? 0} / ${p.wins_b ?? 0}`;
+    // True model-identity win counts (not raw position - see viewer_server_v2.py
+    // comment on wins_llama3/wins_mistral, RESEARCH_LOG Section 29/30).
+    document.getElementById('stat-wins').textContent = `${p.wins_llama3 ?? 0} / ${p.wins_mistral ?? 0}`;
     document.getElementById('stat-judge').textContent = `${p.avg_judge_total_a ?? '–'} / ${p.avg_judge_total_b ?? '–'}`;
 
     // Rate + ETA from recent completion timestamps
@@ -205,8 +210,14 @@ async function poll() {
         const rowKey = `${r.question_idx}-${r.attempt_number}`;
         newIds.add(rowKey);
         const isNew = !lastIds.has(rowKey) && lastIds.size > 0;
-        const winClass = r.winner === 'A' ? 'win-a' : 'win-b';
-        const winName = r.winner === 'A' ? 'LLaMA 3' : 'Mistral';
+        // True model identity, not raw position - position is randomized per
+        // question (RESEARCH_LOG Section 17), so "winner === 'A'" does NOT
+        // reliably mean LLaMA3 wrote it. Was hardcoded A=LLaMA3/B=Mistral
+        // here, which silently mislabeled the winner whenever the coin flip
+        // put Mistral in slot A - see RESEARCH_LOG Section 29/30.
+        const trueWinnerModel = r.winner === 'A' ? r.model_a : r.model_b;
+        const winClass = trueWinnerModel === 'mistral' ? 'win-mistral' : 'win-llama3';
+        const winName = trueWinnerModel === 'mistral' ? 'Mistral' : 'LLaMA 3';
         const scoreClass = (r.weighted_score ?? 0) >= 0.75 ? 'score-ok' : 'score-low';
         const attemptClass = r.attempt_number > 1 ? 'attempt-badge regen' : 'attempt-badge';
         // Shows "2/3" (kept attempt / total tried) rather than just "#2" -
@@ -285,9 +296,19 @@ function attemptHistoryTable(d) {
     </table>`;
 }
 
+function modelLabel(slug) {
+  return slug === 'mistral' ? 'Mistral' : 'LLaMA 3';
+}
+
 function renderDetail(d) {
-  const winName = d.winner === 'A' ? 'LLaMA 3 (Answer A)' : 'Mistral (Answer B)';
+  // Answer A/B is just a slot - which model actually wrote it is in
+  // model_a/model_b (randomized per question, RESEARCH_LOG Section 17).
+  // Was hardcoded A=LLaMA3/B=Mistral here, mislabeling both the winner AND
+  // which answer text belongs to which model whenever the coin flip swapped
+  // them - see RESEARCH_LOG Section 29/30.
+  const nameA = modelLabel(d.model_a), nameB = modelLabel(d.model_b);
   const aWin = d.winner === 'A', bWin = d.winner === 'B';
+  const winName = `${aWin ? nameA : nameB} (Answer ${d.winner})`;
   document.getElementById('modal-body').innerHTML = `
     <div class="modal-q">${esc(d.question)}</div>
     <div class="modal-meta">
@@ -301,11 +322,11 @@ function renderDetail(d) {
     <div class="modal-section-title" style="border-top:none;margin-top:0;">Answers</div>
     <div class="answer-cols">
       <div class="answer-col ${aWin ? 'is-winner' : ''}">
-        <div class="answer-col-title">Answer A — LLaMA 3 ${aWin ? '★ Winner' : ''}</div>
+        <div class="answer-col-title">Answer A — ${nameA} ${aWin ? '★ Winner' : ''}</div>
         <div class="answer-text">${esc(d.answer_a || '')}</div>
       </div>
       <div class="answer-col ${bWin ? 'is-winner' : ''}">
-        <div class="answer-col-title">Answer B — Mistral ${bWin ? '★ Winner' : ''}</div>
+        <div class="answer-col-title">Answer B — ${nameB} ${bWin ? '★ Winner' : ''}</div>
         <div class="answer-text">${esc(d.answer_b || '')}</div>
       </div>
     </div>

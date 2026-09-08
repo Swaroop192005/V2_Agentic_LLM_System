@@ -6,3 +6,9 @@
 
 [Context DB] SQLite context store initialised at context.db
 [RAG Store] Local Vector Store initialised at data/rag_knowledge.db
+INFO:     127.0.0.1:53843 - "POST /api/health HTTP/1.1" 405 Method Not Allowed
+INFO:     127.0.0.1:61936 - "POST /api/stream HTTP/1.1" 200 OK
+[SimilarityUtil] Loading sentence-transformer model on cuda...
+[SimilarityUtil] Model loaded.
+[LLama 3 Answer Generator] Thinking...
+[Mistral Answer Generator] Thinking...
