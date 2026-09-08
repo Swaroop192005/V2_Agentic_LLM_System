@@ -1054,4 +1054,74 @@ entirely on non-RAG answers, so whether it's equally well-calibrated for
 RAG-assisted ones is unknown. `rag_pipeline_outcomes` now collects exactly
 what a future check of that would need.
 
+## 27. A side-effect of 0.75 not caught in Section 24: most final answers now ship below it anyway
+
+User spotted rows in the dataset viewer where a question's kept ("final")
+attempt still scored below 0.75 and asked whether regeneration was
+actually working. Traced the exact logic
+(`generate_training_data_v2.py::process_question`): the retry loop is
+correctly comparing every attempt against the live `DEFAULT_THRESHOLD`
+(confirmed - e.g. a 0.751 attempt gets `regen_reason=None`/kept, a 0.742
+one gets flagged `low_confidence`, exactly at the 0.75 boundary). Not a
+bug. But `MAX_REGENERATION_ATTEMPTS = 2` caps every question at 3 total
+attempts, after which the pipeline ships whichever of the 3 scored
+highest - even if NONE of them cleared the threshold. So "threshold 0.75"
+does not mean "every shipped answer scores >=0.75"; it means "try up to 3
+times to reach 0.75, then ship the best attempt regardless."
+
+Quantified for the 521 final answers shipped since the 0.75 change:
+
+| | Count | % |
+|---|---|---|
+| Shipped below 0.75 despite the retry loop | 310 | 59.5% |
+| ...of those, exhausted all 3 attempts and still never cleared it | 110 | 21.1% of all shipped |
+
+This is a real consequence of Section 24's threshold change that wasn't
+surfaced at the time - the regeneration-cost analysis (Section 23/24)
+measured how often FIRST attempts would need a retry, not how often the
+retry loop would actually succeed in reaching the new, harder bar within
+the existing 3-attempt cap. Worth remembering for the writeup: raising a
+threshold changes two things at once - how often retries trigger, AND
+(given a fixed attempt cap) how often they actually succeed - and only the
+first was measured before shipping the change.
+
+**Decision: accepted as-is.** `MAX_REGENERATION_ATTEMPTS` stays at 2 (3
+total attempts). Consistent with Section 23's ceiling finding (few answers
+ever exceed ~0.85, and per-attempt improvement rates decline the higher
+the bar climbs) - a 4th or 5th attempt would very likely keep paying
+compute cost for shrinking odds of actually clearing 0.75, not obviously a
+better trade than "best of 3." No code change. The dataset's `weighted_score`
+column remains the honest, ungated signal either way - `regen_reason` and
+`is_final_attempt` describe what the pipeline DID, not a guarantee about
+the number itself, and any downstream analysis should keep filtering on
+`weighted_score` directly rather than assuming "final" implies ">= threshold."
+
+## 28. Dataset viewer fixed to show discarded attempts, plus a stale 0.68 reference caught
+
+Direct follow-up to Section 27: a user spot-check of question #4070 in
+`data_viewer_v2.html` showed "Attempt 2 · 63.7%" with no sign a 3rd attempt
+ever ran, reading exactly like the regeneration loop had silently stopped
+early. It hadn't - `question_idx=4070` genuinely has 3 logged attempts
+(62.8% / 63.7% kept / 63.1% discarded) - the viewer's `/api/recent` only
+ever selected `is_final_attempt=1` rows, so a tried-and-discarded attempt
+was simply invisible, not missing.
+
+**Fix**: `viewer_server_v2.py::get_recent()` now includes `total_attempts`
+per row (a correlated subquery) so the table badge reads "2/3" instead of
+a bare "#2". `get_detail()` now also returns `siblings` - every other
+attempt for the same `question_idx` - and the detail modal renders a new
+"Attempt history for this question" table listing every attempt tried,
+which one was kept, and why the others weren't. Verified against
+question 4070 directly: `/api/detail` now correctly returns the kept
+attempt (63.7%) alongside both siblings (62.8%, 63.1%).
+
+**Also caught while in this file**: the row-coloring threshold
+(`weighted_score >= 0.68 ? 'score-ok' : 'score-low'`) was never updated
+when `DEFAULT_THRESHOLD` moved to 0.75 in Section 24 - every row scoring
+0.68-0.75 was showing green ("passes") in the viewer despite actually
+being below the live threshold. Fixed to match. A reminder that a
+threshold living in two places (the scoring code and a UI's display logic)
+needs both updated together - worth checking for other such copies before
+the next threshold change.
+
 *(Log continues below as further tests complete.)*

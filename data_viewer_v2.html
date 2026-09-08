@@ -93,6 +93,7 @@
   .score-table th { color: var(--text-faint); font-weight: 700; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.4px; }
   .score-table td { color: var(--text-dim); }
   .score-table td.num { text-align: center; font-variant-numeric: tabular-nums; color: var(--text); }
+  .score-table tr.is-kept-attempt td { color: var(--green); font-weight: 700; }
   .sig-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .sig-item { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
   .sig-val { font-size: 1rem; font-weight: 800; color: var(--text); }
@@ -206,12 +207,16 @@ async function poll() {
         const isNew = !lastIds.has(rowKey) && lastIds.size > 0;
         const winClass = r.winner === 'A' ? 'win-a' : 'win-b';
         const winName = r.winner === 'A' ? 'LLaMA 3' : 'Mistral';
-        const scoreClass = (r.weighted_score ?? 0) >= 0.68 ? 'score-ok' : 'score-low';
+        const scoreClass = (r.weighted_score ?? 0) >= 0.75 ? 'score-ok' : 'score-low';
         const attemptClass = r.attempt_number > 1 ? 'attempt-badge regen' : 'attempt-badge';
+        // Shows "2/3" (kept attempt / total tried) rather than just "#2" -
+        // a bare attempt number hides that a later, discarded attempt was
+        // also tried and scored lower (see RESEARCH_LOG Section 27/28).
+        const attemptLabel = r.total_attempts > 1 ? `${r.attempt_number}/${r.total_attempts}` : `#${r.attempt_number}`;
         const ts = r.created_at ? new Date(r.created_at).toLocaleTimeString() : '';
         return `<tr class="${isNew ? 'flash' : ''} row-clickable" data-id="${r.id}">
           <td class="q-cell" title="${esc(r.question)}">${esc(r.question)}</td>
-          <td><span class="${attemptClass}">#${r.attempt_number}</span></td>
+          <td><span class="${attemptClass}" title="${r.total_attempts > 1 ? `Kept attempt ${r.attempt_number} of ${r.total_attempts} tried` : 'Only attempt'}">${attemptLabel}</span></td>
           <td class="${winClass}">${winName}</td>
           <td class="${scoreClass}">${r.weighted_score !== null ? (r.weighted_score*100).toFixed(1)+'%' : '–'}</td>
           <td>${r.judge_total_a}/${r.judge_total_b}</td>
@@ -257,16 +262,41 @@ function scoreTable(title, detail, prefix) {
     </table>`;
 }
 
+function attemptHistoryTable(d) {
+  const siblings = d.siblings || [];
+  if (siblings.length === 0) return '';
+  const all = [...siblings, {
+    id: d.id, attempt_number: d.attempt_number, weighted_score: d.weighted_score,
+    is_final_attempt: 1, regen_reason: d.regen_reason,
+  }].sort((a, b) => a.attempt_number - b.attempt_number);
+  const rows = all.map(s => {
+    const kept = s.is_final_attempt === 1;
+    const pct = s.weighted_score !== null ? (s.weighted_score*100).toFixed(1)+'%' : '–';
+    const why = kept ? '★ kept (highest of all attempts tried)' : 'discarded — scored lower than the kept attempt';
+    return `<tr class="${kept ? 'is-kept-attempt' : ''}">
+      <td>Attempt ${s.attempt_number}</td><td class="num">${pct}</td><td>${why}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="modal-section-title">Attempt history for this question (${all.length} tried)</div>
+    <table class="score-table">
+      <thead><tr><th>Attempt</th><th>Weighted score</th><th>Outcome</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 function renderDetail(d) {
   const winName = d.winner === 'A' ? 'LLaMA 3 (Answer A)' : 'Mistral (Answer B)';
   const aWin = d.winner === 'A', bWin = d.winner === 'B';
   document.getElementById('modal-body').innerHTML = `
     <div class="modal-q">${esc(d.question)}</div>
     <div class="modal-meta">
-      Question #${d.question_idx} · Attempt ${d.attempt_number} · Winner: ${winName} ·
+      Question #${d.question_idx} · Attempt ${d.attempt_number}${d.siblings && d.siblings.length ? ` of ${d.siblings.length + 1} tried` : ''} · Winner: ${winName} ·
       Weighted score: ${d.weighted_score !== null ? (d.weighted_score*100).toFixed(1)+'%' : '–'} ·
       ${d.elapsed_secs ? d.elapsed_secs.toFixed(0)+'s' : ''} · ${d.created_at ? new Date(d.created_at).toLocaleString() : ''}
     </div>
+
+    ${attemptHistoryTable(d)}
 
     <div class="modal-section-title" style="border-top:none;margin-top:0;">Answers</div>
     <div class="answer-cols">

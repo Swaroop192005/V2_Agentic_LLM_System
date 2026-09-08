@@ -1,0 +1,8 @@
+
++--------------------------------------------------------------+
+|   Agentic Multi-LLM Validation System  -- Web Server          |
+|   Open: http://localhost:8000                                 |
++--------------------------------------------------------------+
+
+[Context DB] SQLite context store initialised at context.db
+[RAG Store] Local Vector Store initialised at data/rag_knowledge.db

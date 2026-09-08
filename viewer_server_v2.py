@@ -71,10 +71,15 @@ def get_progress():
 
 
 def get_recent(limit=30):
+    # total_attempts lets the UI show "2/3" instead of just "#2" - without it,
+    # a discarded 3rd attempt (tried, scored lower, not kept) is invisible,
+    # which is exactly what looked like a stalled regeneration loop when a
+    # user spot-checked a row against the raw DB (RESEARCH_LOG Section 27/28).
     return query_db(
         """SELECT id, question_idx, question, attempt_number, winner, weighted_score,
                   judge_total_a, judge_total_b, verifier_judge_agreement,
-                  wikipedia_score, wikidata_score, elapsed_secs, created_at
+                  wikipedia_score, wikidata_score, elapsed_secs, created_at,
+                  (SELECT COUNT(*) FROM pipeline_runs p2 WHERE p2.question_idx = pipeline_runs.question_idx) AS total_attempts
            FROM pipeline_runs
            WHERE is_final_attempt=1
            ORDER BY id DESC
@@ -83,9 +88,24 @@ def get_recent(limit=30):
     )
 
 
+def get_sibling_attempts(question_idx, exclude_id):
+    """Every other attempt logged for the same question - so the detail
+    modal can show what was tried and discarded, not just the kept one."""
+    return query_db(
+        """SELECT id, attempt_number, weighted_score, is_final_attempt, regen_reason
+           FROM pipeline_runs WHERE question_idx = ? AND id != ?
+           ORDER BY attempt_number""",
+        (question_idx, exclude_id),
+    )
+
+
 def get_detail(row_id):
     rows = query_db("SELECT * FROM pipeline_runs WHERE id=?", (row_id,))
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    detail = rows[0]
+    detail["siblings"] = get_sibling_attempts(detail["question_idx"], row_id)
+    return detail
 
 
 class Handler(BaseHTTPRequestHandler):
