@@ -80,10 +80,15 @@ LOG_PATH = ROOT / "training_log_v2.txt"
 CONCURRENCY = 1
 
 # Control-group probability for threshold validation (see process_question).
-# Chosen small enough not to meaningfully slow the main 5000-question run
-# (extra attempt on ~8% of already-passing questions) while still building a
-# few hundred control samples over the remaining run.
-CONTROL_REGEN_PROBABILITY = 0.08
+# Raised 0.08 -> 0.60 at 4350/5000 (RESEARCH_LOG Section 32): with only
+# ~650 questions left and just 16 post-0.75 control samples banked so far,
+# 8% would only add ~18 more by completion - nowhere near enough for a real
+# recheck of whether 0.75 itself is well-calibrated. At 60%, only the ~35%
+# of questions that already pass on attempt 1 are affected, so this adds a
+# modest ~8-10% more attempts over the remaining stretch while landing
+# total post-0.75 control samples around ~150 - enough to actually revisit
+# the threshold question this run, not the next one.
+CONTROL_REGEN_PROBABILITY = 0.60
 
 
 def init_db(conn: sqlite3.Connection) -> None:

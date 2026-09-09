@@ -1257,4 +1257,41 @@ meaningfully toward "judge artifact" rather than "genuine Mistral
 advantage." Flagged as the leading open question for the next research
 phase, rather than settled.
 
+## 32. Control-sample rate raised 8% -> 60% to actually finish the threshold recheck this run
+
+At 4350/5000, checked how much control-sample data (Section 21's mechanism)
+had actually accumulated under the NEW 0.75 threshold specifically - not
+just in total. Of 133 total control_sample rows, only **16** were drawn
+from the post-0.75 population; the other 117 predate the threshold change
+and were already spent proving 0.75 itself (Section 24) - they can't be
+reused to test whether an even higher bar would be justified, since they
+were sampled from the old >=0.68 population, not >=0.75.
+
+At the original 8% rate, only ~18 more were projected by the time the
+5000-question run finishes (based on ~35% of first attempts passing at
+0.75, times 8%, times the ~650 remaining questions) - nowhere near the
+150-250 needed for a confident recheck, meaning this run would end with
+the threshold question still unresolved.
+
+**Fix: raised `CONTROL_REGEN_PROBABILITY` from 0.08 to 0.60.** Only the
+~35% of questions that already pass on attempt 1 are affected (the other
+~65% already get a real regeneration attempt regardless), so this adds a
+modest ~8-10% more total attempts over the remaining ~650 questions, not a
+repeat of the much larger cost the original threshold change carried.
+Expected payoff: ~136 additional post-0.75 control samples, landing total
+around **~150** by completion - enough to actually re-run the Section 24
+methodology (ROC/Youden's J + bootstrap) against a threshold-appropriate
+sample before this dataset run ends, rather than deferring it to a future
+one.
+
+Considered and rejected: storing the new control-sample attempts in a
+separate database. The existing `regen_reason='control_sample'` column
+already isolates this data with zero extra code; splitting storage would
+touch the live write path of an 87%-complete run for no analytical
+benefit, and would require cross-database joins to compare a control
+attempt against its own question's attempt 1 (which would remain in the
+main database) - strictly worse than the single-database tag already in
+place. Generator restarted with the new probability; verified via
+`py_compile` before restart and a fresh PID after.
+
 *(Log continues below as further tests complete.)*
