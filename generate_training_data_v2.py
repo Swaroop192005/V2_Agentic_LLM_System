@@ -256,7 +256,7 @@ async def run_one_attempt(query: str, rag_context: str = "") -> dict:
 
 def insert_attempt(conn: sqlite3.Connection, question_idx: int, question: str,
                     attempt_number: int, is_final: bool, r: dict, final_answer: str | None,
-                    regen_reason: str | None = None) -> None:
+                    regen_reason: str | None = None) -> int:
     vp, jp = r["verifier_parsed"], r["judge_parsed"]
     cols = ["question_idx", "question", "attempt_number", "is_final_attempt",
             "answer_a", "answer_b", "model_a", "model_b", "verifier_raw", "judge_raw"]
@@ -282,8 +282,9 @@ def insert_attempt(conn: sqlite3.Connection, question_idx: int, question: str,
               r["weighted_score"], regen_reason, final_answer, r["elapsed_secs"], datetime.now().isoformat()]
 
     placeholders = ",".join(["?"] * len(vals))
-    conn.execute(f"INSERT INTO pipeline_runs ({','.join(cols)}) VALUES ({placeholders})", vals)
+    cur = conn.execute(f"INSERT INTO pipeline_runs ({','.join(cols)}) VALUES ({placeholders})", vals)
     conn.commit()
+    return cur.lastrowid
 
 
 async def process_question(idx: int, question: str, conn: sqlite3.Connection, sem: asyncio.Semaphore,
@@ -291,12 +292,11 @@ async def process_question(idx: int, question: str, conn: sqlite3.Connection, se
     async with sem:
         t_start = time.time()
         best = None
-        best_attempt_number = None
+        best_row_id = None
         for attempt in range(1, MAX_REGENERATION_ATTEMPTS + 2):
             r = await run_one_attempt(question)
             if best is None or r["weighted_score"] > best["weighted_score"]:
                 best = r
-                best_attempt_number = attempt
 
             needs_regen = r["weighted_score"] < DEFAULT_THRESHOLD
             # Control group for threshold validation (RESEARCH_LOG.md Section 20):
@@ -308,8 +308,10 @@ async def process_question(idx: int, question: str, conn: sqlite3.Connection, se
             is_control = (not needs_regen) and attempt == 1 and random.random() < CONTROL_REGEN_PROBABILITY
             regen_reason = "low_confidence" if needs_regen else ("control_sample" if is_control else None)
 
-            insert_attempt(conn, idx, question, attempt, is_final=False, r=r, final_answer=None,
-                            regen_reason=regen_reason)
+            row_id = insert_attempt(conn, idx, question, attempt, is_final=False, r=r, final_answer=None,
+                                     regen_reason=regen_reason)
+            if best_row_id is None or r is best:
+                best_row_id = row_id
 
             if attempt > MAX_REGENERATION_ATTEMPTS:
                 break
@@ -324,12 +326,22 @@ async def process_question(idx: int, question: str, conn: sqlite3.Connection, se
         )
         final_answer = await loop.run_in_executor(None, combiner_agent.run, combiner_prompt)
 
-        # Mark the winning attempt's row as final - question_idx + attempt_number uniquely
-        # identifies it even if the question text happens to repeat elsewhere in the bank.
+        # Mark the winning attempt's row as final, targeted by its own unique row
+        # id - NOT by (question_idx, attempt_number). That pair looked unique but
+        # isn't: if this process is ever killed between inserting an attempt and
+        # reaching this point (a crash, a sleep gap, or a deliberate restart for a
+        # code change - all of which happened repeatedly over this project's
+        # history), the question gets reprocessed from scratch on restart, and its
+        # fresh "attempt 1" shares that same (question_idx, attempt_number) pair
+        # with the orphaned old row. An UPDATE keyed on that pair matches BOTH,
+        # silently flagging the stale orphan as final too - found post-hoc at
+        # 5000/5000 (4 duplicated rows, one traced to this exact restart pattern
+        # during the Section 24 threshold change) and fixed here at the source
+        # rather than just cleaning up the symptom. See RESEARCH_LOG Section 33.
         conn.execute(
             """UPDATE pipeline_runs SET is_final_attempt = 1, final_answer = ?
-               WHERE question_idx = ? AND attempt_number = ?""",
-            (final_answer, idx, best_attempt_number),
+               WHERE id = ?""",
+            (final_answer, best_row_id),
         )
         conn.commit()
 

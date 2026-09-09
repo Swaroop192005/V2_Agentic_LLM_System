@@ -1294,4 +1294,103 @@ main database) - strictly worse than the single-database tag already in
 place. Generator restarted with the new probability; verified via
 `py_compile` before restart and a fresh PID after.
 
+## 33. Dataset generation complete (5000/5000) - a real duplicate-final-row bug found and fixed at the finish line
+
+Generation reached 5000/5000 questions. Completion checklist run before
+calling the dataset done:
+
+**Pipeline health**: heartbeat log clean straight through completion, no
+gaps in the final stretch. Generator process exited on its own after
+question 5000 (confirmed via `training_log_v2.txt`'s last line and the
+process no longer running).
+
+**Data integrity check caught a real bug**: `COUNT(*) WHERE
+is_final_attempt=1` returned 5003, not 5000 - 4 questions each had TWO
+rows flagged final. Traced to the exact mechanism: the final-marking
+statement matched rows by `(question_idx, attempt_number)` -
+
+```sql
+UPDATE pipeline_runs SET is_final_attempt = 1, ...
+WHERE question_idx = ? AND attempt_number = ?
+```
+
+- which looks unique per question but isn't, whenever the generator gets
+killed between inserting an attempt and reaching this update (a crash, a
+sleep gap, or a deliberate restart for a code change - all of which
+happened repeatedly across this project's history, per Sections 6 and 19).
+The orphaned old row is left with no final flag; on restart,
+`already_done()` correctly doesn't find one and reprocesses the question
+from scratch, but the fresh run's own "attempt 1" shares that same
+`(question_idx, attempt_number)` pair with the orphan - so the UPDATE
+matches and flags BOTH rows. One of the four (`question_idx=3552`) lines
+up exactly with the restart performed for Section 24's threshold change -
+this session caused at least one of these four itself, not just inherited
+it.
+
+**Fixed both the data and the root cause, not just the symptom**:
+- Un-flagged the 4 orphaned rows directly (kept whichever row belonged to
+  the run that actually reached the Combiner step) - back to a clean
+  5000/5000.
+- `insert_attempt()` now returns its row's `id`; `process_question` tracks
+  `best_row_id` alongside the best-scoring attempt and the final UPDATE
+  targets `WHERE id = ?` instead of the ambiguous idx+attempt_number pair.
+  This can't recur regardless of how many times a future run gets
+  interrupted mid-question.
+
+**Final dataset stats** (post-fix): 5000/5000 questions, 5000 final rows
+(verified duplicate-free), 8432 total attempt rows logged. Core signals
+(judge, similarity, model agreement, verifier-judge agreement) 100%
+available on every final row - zero nulls. Wikipedia/Wikidata coverage
+53.9%/40.6% (optional, relevance-gated by design). Position randomizer
+held at 48.7%/51.3% llama3/mistral across the entire run - no drift.
+regen_reason tally: 4104 clean, 4163 low_confidence, **165 control_sample
+total, 48 of them post-0.75** (the population relevant to the final
+threshold recheck below).
+
+## 34. Final threshold recheck at 5000/5000 - another sampling-weight bug caught before being reported, then a real answer
+
+Ran `training/optimal_threshold_roc.py` against the complete dataset. First
+result looked alarming: optimal cutoff **0.68**, 95% bootstrap CI
+[0.68, 0.71] - appearing to flatly contradict Section 24's 0.75 decision.
+
+**Not trusted at face value - and rightly so.** `CONTROL_REGEN_PROBABILITY`
+changed mid-dataset (0.08 -> 0.60, Section 32), but the script imported
+and applied *today's* value (0.60) to every `control_sample` row
+regardless of when it was generated - silently undercounting the ~117
+rows actually sampled at the old 8% rate (weighting them 1.67x instead of
+their true 12.5x). This dilutes exactly the hard-won data that originally
+justified 0.75, pulling the result back toward the low_confidence
+-dominated answer the very first (pre-Section-24-fix) version of this
+script produced - the same failure shape as before, just from a different
+cause.
+
+**Boundary found empirically, not guessed**: the fraction of PASSING
+attempt-1 rows actually marked `control_sample` (undiluted by the failing
+population) sits at 0-20% noise before `question_idx~4650` and jumps to
+33-100% after - consistent with 8% before, 60% after. Rows now weighted
+by whichever rate was truly active when generated.
+
+**Corrected result**:
+
+| | Buggy | Corrected |
+|---|---|---|
+| Optimal cutoff (Youden's J) | 0.68 | **0.70** |
+| Bootstrap median / mode | 0.69 / 0.68 | 0.72 / 0.70 |
+| 95% bootstrap CI | [0.68, 0.71] | **[0.69, 0.75]** |
+| AUC | 0.619 | 0.629 |
+
+**Conclusion: 0.75 holds up.** It sits inside the corrected 95% CI - at
+the edge rather than dead center (the point estimate shifted a bit lower,
+~0.70-0.72, with the full dataset), but not contradicted. Youden's J stays
+nearly flat across 0.69-0.75 (0.14-0.19) - a broad near-optimal plateau,
+not one sharp peak, so 0.75 landing slightly off the exact peak isn't a
+meaningful miscalibration. No threshold change made - the dataset is
+complete and immutable, so `DEFAULT_THRESHOLD` only affects the live demo
+or a future run, neither in progress. This closes the threshold
+-calibration thread that ran from Section 20 through here: three separate
+sampling/circularity bugs caught across the investigation (Section 20's
+verifier_judge_agreement circularity, Section 24's initial case-control
+miscount, this one), each corrected before being reported as fact rather
+than after - the pattern this whole project has run on since Section 8.
+
 *(Log continues below as further tests complete.)*

@@ -60,13 +60,33 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from utils.scoring import DEFAULT_WEIGHTS, DEFAULT_THRESHOLD
+
 from training.threshold_weight_sweep import DB_PATH, weighted_composite
-from generate_training_data_v2 import CONTROL_REGEN_PROBABILITY
 
 OTHER_SIGNALS = ("similarity", "model_agreement", "verifier_judge_agreement", "wikipedia", "wikidata")
 MIN_WEIGHTED_BUCKET = 15  # below this (in effective/weighted n), a cutoff is too noisy to trust
 CENSUS_WEIGHT = 1.0
-CONTROL_WEIGHT = 1.0 / CONTROL_REGEN_PROBABILITY  # ~12.5 - each control row stands in for ~12.5 unsampled peers
+
+# CONTROL_REGEN_PROBABILITY changed mid-dataset (0.08 -> 0.60, RESEARCH_LOG
+# Section 32) - importing the CURRENT value and applying it to every
+# control_sample row would silently mis-weight the ~117 rows sampled under
+# the OLD 8% rate (they'd be undercounted at 1.67x instead of their true
+# 12.5x), diluting exactly the data that originally justified 0.75 and
+# pulling the "optimal" cutoff back toward the low_confidence-dominated
+# result the very first (uncorrected) version of this script produced.
+# Boundary found empirically: the fraction of PASSING attempt-1 rows that
+# were actually marked control_sample (undiluted by the failing
+# population, unlike the raw per-question rate) sits at 0-20% noise before
+# question_idx ~4650 and jumps to 33-100% after - consistent with 8% vs
+# 60%. Rows are weighted by whichever rate was actually active when they
+# were generated, not by re-reading today's constant.
+CONTROL_PROBABILITY_CHANGE_AT_QIDX = 4650
+CONTROL_WEIGHT_OLD = 1.0 / 0.08   # 12.5
+CONTROL_WEIGHT_NEW = 1.0 / 0.60   # ~1.667
+
+
+def control_weight_for(question_idx: int) -> float:
+    return CONTROL_WEIGHT_NEW if question_idx > CONTROL_PROBABILITY_CHANGE_AT_QIDX else CONTROL_WEIGHT_OLD
 
 
 def load_rows_with_reason() -> list[dict]:
@@ -124,7 +144,7 @@ def build_labeled_set(rows: list[dict]) -> list[tuple[float, bool, float]]:
         o1, o2 = other_signal_avg(a1), other_signal_avg(a2)
         if score1 is None or o1 is None or o2 is None:
             continue
-        weight = CONTROL_WEIGHT if a1.get("regen_reason") == "control_sample" else CENSUS_WEIGHT
+        weight = control_weight_for(qidx) if a1.get("regen_reason") == "control_sample" else CENSUS_WEIGHT
         labeled.append((score1, o2 > o1, weight))
     return labeled
 
@@ -199,7 +219,8 @@ def main():
     n_total_w = sum(w for _, _, w in labeled)
     print(f"Labeled pairs: {len(labeled)} raw questions -> {n_total_w:.0f} effective (sampling-corrected) population")
     print(f"  effective improved: {n_improved_w:.0f}  ({n_improved_w/n_total_w*100:.1f}%)")
-    print(f"  control rows carry weight {CONTROL_WEIGHT:.2f}x (1/{CONTROL_REGEN_PROBABILITY}); census rows carry 1.0x\n")
+    print(f"  control rows carry weight {CONTROL_WEIGHT_OLD:.2f}x (qidx<={CONTROL_PROBABILITY_CHANGE_AT_QIDX}, 1/0.08) "
+          f"or {CONTROL_WEIGHT_NEW:.2f}x (qidx>{CONTROL_PROBABILITY_CHANGE_AT_QIDX}, 1/0.60); census rows carry 1.0x\n")
 
     grid = [round(0.50 + 0.01 * i, 2) for i in range(37)]  # 0.50 .. 0.86
 
