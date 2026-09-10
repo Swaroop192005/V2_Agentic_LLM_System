@@ -1,0 +1,300 @@
+<title>Multi-LLM Validation Deck</title>
+<style>
+  :root {
+    --bg: #0F1622; --panel: #16202E; --panel-2: #1E2A3A;
+    --ink: #EEF1F5; --ink-soft: #A7B2C1; --ink-faint: #6D7A8C;
+    --border: #263243; --border-strong: #38485C;
+    --accent: #6E97D6; --accent-bright: #8FB2EC; --accent-wash: #1B2740;
+    --gold: #D9A441; --gold-wash: #2A2213;
+    --teal: #46B3A6; --teal-wash: #12261F;
+    --rust: #D9714E;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; text-wrap: balance; letter-spacing: -0.01em; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
+
+  .deck { height: 100vh; width: 100vw; position: relative; }
+  .slide {
+    position: absolute; inset: 0; display: none;
+    flex-direction: column; justify-content: center;
+    padding: clamp(28px, 6vw, 90px);
+    max-width: 1100px; margin: 0 auto;
+  }
+  .slide.active { display: flex; animation: fade .35s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .slide.active { animation: none; } }
+
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: clamp(11px, 1.3vw, 14px); letter-spacing: .12em; text-transform: uppercase; color: var(--accent-bright); display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .kicker::before { content: ""; width: 26px; height: 2px; background: var(--accent); display: inline-block; }
+
+  .slide h1 { font-size: clamp(34px, 6.2vw, 68px); line-height: 1.03; margin-bottom: 20px; }
+  .slide h2 { font-size: clamp(26px, 4.4vw, 44px); line-height: 1.08; margin-bottom: 24px; }
+  .slide p.big { font-size: clamp(17px, 2.3vw, 24px); color: var(--ink-soft); max-width: 40ch; line-height: 1.5; }
+  .slide p.sub { font-size: clamp(14px, 1.7vw, 18px); color: var(--ink-faint); max-width: 52ch; margin-top: 8px; }
+
+  .meta { margin-top: 34px; display: flex; flex-wrap: wrap; gap: 8px 26px; font-family: "IBM Plex Mono", monospace; font-size: clamp(11px, 1.3vw, 14px); color: var(--ink-faint); }
+  .meta b { color: var(--ink-soft); font-weight: 500; }
+
+  ul.pts { list-style: none; display: flex; flex-direction: column; gap: clamp(12px, 1.8vh, 20px); max-width: 46ch; }
+  ul.pts li { display: flex; gap: 14px; align-items: flex-start; font-size: clamp(15px, 2vw, 21px); color: var(--ink-soft); line-height: 1.4; }
+  ul.pts li .m { flex: none; width: 24px; height: 24px; border-radius: 6px; background: var(--accent-wash); color: var(--accent-bright); font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 12px; display: flex; align-items: center; justify-content: center; margin-top: 3px; }
+  ul.pts li b { color: var(--ink); font-weight: 600; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(14px, 2vw, 26px); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: clamp(16px, 2vw, 24px); }
+  .card .lbl { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+  .card .v { font-size: clamp(16px, 2vw, 20px); color: var(--ink); font-weight: 600; }
+  .card .d { font-size: clamp(13px, 1.5vw, 15px); color: var(--ink-soft); margin-top: 6px; line-height: 1.4; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: clamp(10px, 1.6vw, 20px); }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: clamp(16px, 2vw, 26px); }
+  .stat .n { font-family: "IBM Plex Mono", monospace; font-size: clamp(24px, 4vw, 44px); font-weight: 600; color: var(--accent-bright); font-variant-numeric: tabular-nums; line-height: 1; }
+  .stat .k { font-size: clamp(11px, 1.4vw, 15px); color: var(--ink-soft); margin-top: 10px; line-height: 1.35; }
+
+  /* pipeline row */
+  .pipe { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pnode { background: var(--panel); border: 1px solid var(--border-strong); border-radius: 11px; padding: 12px 15px; flex: 1 1 0; min-width: 120px; }
+  .pnode.accent { border-color: var(--accent); background: var(--accent-wash); }
+  .pnode.gold { border-color: var(--gold); background: var(--gold-wash); }
+  .pnode.teal { border-color: var(--teal); background: var(--teal-wash); }
+  .pnode .s { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); }
+  .pnode .t { font-size: clamp(13px, 1.5vw, 16px); font-weight: 600; color: var(--ink); margin-top: 3px; }
+  .pnode .x { font-size: 11.5px; color: var(--ink-soft); margin-top: 2px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: clamp(13px, 1.7vw, 18px); }
+  th, td { text-align: left; padding: 11px 16px 11px 0; border-bottom: 1px solid var(--border); }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); font-weight: 500; }
+  td { color: var(--ink); font-variant-numeric: tabular-nums; }
+  td.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  tr.hl td { color: var(--accent-bright); font-weight: 600; }
+
+  .quote { font-family: "Fraunces", Georgia, serif; font-size: clamp(22px, 3.6vw, 40px); line-height: 1.25; color: var(--ink); max-width: 24ch; }
+  .quote .accent { color: var(--gold); }
+
+  .callout { border-left: 3px solid var(--teal); background: var(--teal-wash); padding: 14px 20px; border-radius: 0 10px 10px 0; font-size: clamp(14px, 1.8vw, 19px); color: var(--ink-soft); max-width: 48ch; margin-top: 10px; }
+  .callout b { color: var(--teal); }
+
+  /* progress + controls */
+  .hud { position: fixed; bottom: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: 14px clamp(20px, 4vw, 40px); z-index: 30; pointer-events: none; }
+  .hud .title { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); letter-spacing: .04em; }
+  .hud .nums { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .ctrl { position: fixed; bottom: 10px; right: clamp(20px, 4vw, 40px); display: flex; gap: 8px; z-index: 31; }
+  .ctrl button { pointer-events: auto; background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--ink-soft); width: 38px; height: 38px; border-radius: 9px; font-size: 17px; cursor: pointer; transition: all .15s; }
+  .ctrl button:hover { background: var(--accent-wash); color: var(--accent-bright); border-color: var(--accent); }
+  .ctrl button:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+  .pbar { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent); z-index: 32; transition: width .35s ease; }
+
+  .hint { position: fixed; top: 16px; right: clamp(20px, 4vw, 40px); font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); z-index: 30; }
+
+  @media (max-width: 680px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    .pipe { flex-direction: column; }
+  }
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="pbar" id="pbar"></div>
+<div class="hint">← → to navigate</div>
+
+<div class="deck" id="deck">
+
+  <!-- 1 · Title -->
+  <section class="slide active">
+    <div class="kicker">Final-Year Project</div>
+    <h1>An Agentic Multi-LLM<br>Answer-Validation System</h1>
+    <p class="big">Can a system of language models decide, on its own, whether an answer is trustworthy — with no human answer key to check against?</p>
+    <div class="meta">
+      <span><b>Generators</b> LLaMA 3 · Mistral</span>
+      <span><b>Verifier</b> phi3</span>
+      <span><b>Judge</b> qwen3.5:9b</span>
+      <span><b>Dataset</b> 5,000 questions</span>
+    </div>
+  </section>
+
+  <!-- 2 · The problem -->
+  <section class="slide">
+    <div class="kicker">01 · The Problem</div>
+    <h2>A model can't grade its own homework</h2>
+    <ul class="pts">
+      <li><span class="m">1</span><span>Ask a language model a hard question and it answers fluently — <b>whether or not it's correct</b>, and it can't reliably tell you which.</span></li>
+      <li><span class="m">2</span><span>Having a second model "check" the first fails quietly — checkers <b>share the same biases</b> and rubber-stamp plausible text.</span></li>
+      <li><span class="m">3</span><span>In this domain there is <b>no ground-truth answer key</b> — so accuracy can't be measured directly. Every design choice must be justified another way.</span></li>
+    </ul>
+  </section>
+
+  <!-- 3 · The approach -->
+  <section class="slide">
+    <div class="kicker">02 · The Idea</div>
+    <h2>Trust through independent corroboration</h2>
+    <p class="big" style="margin-bottom:20px;">Instead of one model checking another, use an ensemble that cross-examines itself — and gate the output on how much that ensemble agrees.</p>
+    <div class="callout"><b>Core principle:</b> two models generate, two more evaluate blindly, three external checks corroborate, and one confidence score decides whether to ship the answer or try again.</div>
+  </section>
+
+  <!-- 4 · Architecture -->
+  <section class="slide">
+    <div class="kicker">03 · Architecture</div>
+    <h2>Six stages, one confidence score</h2>
+    <div class="pipe">
+      <div class="pnode accent"><div class="s">STAGE 1–2</div><div class="t">Generate</div><div class="x">LLaMA 3 + Mistral, independently</div></div>
+      <div class="pnode"><div class="s">STAGE 3</div><div class="t">Verify</div><div class="x">phi3 scores both, blind</div></div>
+      <div class="pnode gold"><div class="s">STAGE 5</div><div class="t">Judge</div><div class="x">qwen3.5:9b scores + picks winner</div></div>
+      <div class="pnode"><div class="s">STAGE 4</div><div class="t">Corroborate</div><div class="x">Wikipedia · Wikidata · agreement</div></div>
+      <div class="pnode teal"><div class="s">STAGE 6</div><div class="t">Gate + Combine</div><div class="x">score ≥ 0.75 or regenerate</div></div>
+    </div>
+    <div class="callout" style="margin-top:26px;"><b>The key control:</b> a per-question coin flip randomizes answer order, and evaluators never see which model wrote which — so position and brand can't leak into a score.</div>
+  </section>
+
+  <!-- 5 · Method -->
+  <section class="slide">
+    <div class="kicker">04 · Method</div>
+    <h2>Every choice earned its place</h2>
+    <p class="big" style="margin-bottom:22px;">With no correctness labels, validity came from two families of label-free test — both of which can <i>fail</i>, which is what makes them real.</p>
+    <div class="grid2">
+      <div class="card"><div class="lbl">Discrimination</div><div class="v">Can it tell bad from good?</div><div class="d">A usable evaluator must score a deliberately broken answer far below a solid one. This test alone rejected two judge models.</div></div>
+      <div class="card"><div class="lbl">Consistency &amp; validity</div><div class="v">Do the signals cohere?</div><div class="d">Signals should predict each other, and a low confidence score should genuinely predict that a retry improves the answer.</div></div>
+    </div>
+  </section>
+
+  <!-- 6 · Finding: judge selection -->
+  <section class="slide">
+    <div class="kicker">05 · Finding</div>
+    <h2>Judge chosen on discrimination, not averages</h2>
+    <table>
+      <thead><tr><th>Judge model</th><th class="num">Mean / 80</th><th class="num">Flat-rate</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>qwen2.5</td><td class="num">71.9</td><td class="num">—</td><td>Ceiling bias</td></tr>
+        <tr><td>CompassJudger-1</td><td class="num">69.3</td><td class="num">57.5%</td><td>No real analysis</td></tr>
+        <tr class="hl"><td>qwen3.5:9b</td><td class="num">65.5</td><td class="num">0.0%</td><td>Adopted</td></tr>
+      </tbody>
+    </table>
+    <p class="sub" style="margin-top:20px;">CompassJudger-1 gave all eight rubric criteria the <b>identical score</b> on 57.5% of answers — a fluent number with no reasoning behind it. Similar averages hid a decisive difference visible only per-criterion.</p>
+  </section>
+
+  <!-- 7 · Finding: bias -->
+  <section class="slide">
+    <div class="kicker">06 · Finding</div>
+    <h2>Position bias was hiding as quality</h2>
+    <p class="sub" style="margin-bottom:22px; max-width:56ch;">Early on, one model was always shown first and prompts named the brands. Once evaluation was made blind and order-randomized, the apparent gap collapsed:</p>
+    <div class="grid2">
+      <div class="card"><div class="lbl">By raw position (artefact)</div><div class="v mono" style="font-size:clamp(22px,3.5vw,34px);">35% · 65%</div><div class="d">A vs B — inflated by the ordering</div></div>
+      <div class="card"><div class="lbl">By true model identity</div><div class="v mono" style="font-size:clamp(22px,3.5vw,34px);">45% · 55%</div><div class="d">LLaMA 3 vs Mistral — the real, small gap</div></div>
+    </div>
+    <p class="sub" style="margin-top:20px;">Separating the two proved most of the "gap" was an artefact — and quantified the modest part that was genuine.</p>
+  </section>
+
+  <!-- 8 · Finding: threshold -->
+  <section class="slide">
+    <div class="kicker">07 · Finding</div>
+    <h2>The 0.75 threshold, proven three ways</h2>
+    <table>
+      <thead><tr><th>Method</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Two-proportion z-test</td><td>p = 0.011 — the drop-off is real</td></tr>
+        <tr><td>ROC / Youden's J</td><td>optimal 0.70–0.74, AUC 0.63</td></tr>
+        <tr class="hl"><td>2,000-sample bootstrap</td><td>95% CI [0.69, 0.75]</td></tr>
+      </tbody>
+    </table>
+    <div class="callout" style="margin-top:24px;"><b>Solved by design:</b> a control group gave a random slice of already-passing answers a retry too — the only way to get unbiased data above the threshold.</div>
+  </section>
+
+  <!-- 9 · Honesty / self-correction -->
+  <section class="slide">
+    <div class="kicker">08 · Rigor</div>
+    <h2>Three measurement bugs — caught, not shipped</h2>
+    <ul class="pts">
+      <li><span class="m">1</span><span>A model's <b>self-reported total</b> didn't match its own scores → now always recomputed from the parts.</span></li>
+      <li><span class="m">2</span><span>A "second-opinion" signal was <b>secretly derived from the judge</b>, inflating results → excluded from the search.</span></li>
+      <li><span class="m">3</span><span>A threshold analysis <b>under-counted part of the data</b> after a sampling rate changed → re-weighted correctly.</span></li>
+    </ul>
+    <p class="sub" style="margin-top:22px;">Each was found by a result looking <i>too clean</i> and being checked — and corrected before it became a conclusion.</p>
+  </section>
+
+  <!-- 10 · The open question -->
+  <section class="slide">
+    <div class="kicker">09 · Honest Limits</div>
+    <h2>What the evidence doesn't settle</h2>
+    <p class="big" style="margin-bottom:18px;">The system prefers Mistral (55%). Is that real quality, or a judge quirk?</p>
+    <div class="grid2">
+      <div class="card"><div class="lbl">The Judge says</div><div class="v">Mistral is more factual</div><div class="d">Higher on correctness, faithfulness, hallucination-freedom.</div></div>
+      <div class="card"><div class="lbl">The Verifier says</div><div class="v">No difference at all</div><div class="d">Same answers, zero gap on any criterion — and it's proven able to spot real gaps.</div></div>
+    </div>
+    <p class="sub" style="margin-top:20px;">Reported as <b>open</b>, with the evidence for both sides — not forced to a tidy conclusion.</p>
+  </section>
+
+  <!-- 11 · Results at a glance -->
+  <section class="slide">
+    <div class="kicker">10 · Delivered</div>
+    <h2>The project at a glance</h2>
+    <div class="stats">
+      <div class="stat"><div class="n">5,000</div><div class="k">questions, one consistent regime</div></div>
+      <div class="stat"><div class="n">8,432</div><div class="k">attempts, every signal logged</div></div>
+      <div class="stat"><div class="n">6</div><div class="k">pipeline stages, fully instrumented</div></div>
+      <div class="stat"><div class="n">35</div><div class="k">dated research-log entries</div></div>
+    </div>
+    <p class="sub" style="margin-top:26px;">A working pipeline, a bias-corrected dataset, a statistically calibrated confidence gate, and a transparent record of how every decision was justified.</p>
+  </section>
+
+  <!-- 12 · Closing -->
+  <section class="slide">
+    <div class="kicker">In one line</div>
+    <p class="quote">The contribution isn't a pipeline that runs — it's a <span class="accent">method for trusting it</span> where no ground truth exists.</p>
+    <div class="meta" style="margin-top:40px;">
+      <span><b>Thank you</b></span>
+      <span>Questions welcome</span>
+    </div>
+  </section>
+
+</div>
+
+<div class="hud">
+  <span class="title">Agentic Multi-LLM Validation System</span>
+  <span class="nums"><span id="cur">1</span> / <span id="tot">12</span></span>
+</div>
+<div class="ctrl">
+  <button id="prev" aria-label="Previous slide">‹</button>
+  <button id="next" aria-label="Next slide">›</button>
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  let i = 0;
+  const cur = document.getElementById('cur');
+  const tot = document.getElementById('tot');
+  const pbar = document.getElementById('pbar');
+  tot.textContent = slides.length;
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+    cur.textContent = i + 1;
+    pbar.style.width = ((i + 1) / slides.length * 100) + '%';
+  }
+  function nextS() { show(i + 1); }
+  function prevS() { show(i - 1); }
+
+  document.getElementById('next').addEventListener('click', nextS);
+  document.getElementById('prev').addEventListener('click', prevS);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); nextS(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevS(); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  // click left/right third of screen to navigate (skip the control buttons)
+  document.getElementById('deck').addEventListener('click', (e) => {
+    if (e.target.closest('.ctrl')) return;
+    if (e.clientX > window.innerWidth * 0.6) nextS();
+    else if (e.clientX < window.innerWidth * 0.4) prevS();
+  });
+  show(0);
+</script>
