@@ -1,0 +1,425 @@
+<title>Agentic Multi-LLM Validation</title>
+<style>
+  :root {
+    --bg: #EDEFF0;
+    --surface: #FFFFFF;
+    --surface-2: #E3E7EA;
+    --ink: #171B20;
+    --ink-soft: #4E5763;
+    --ink-faint: #838B96;
+    --border: #D3D8DC;
+    --border-strong: #B7BEC5;
+    --accent: #33507D;
+    --accent-strong: #223B60;
+    --accent-wash: #E4E9F1;
+    --gold: #B9812A;
+    --gold-wash: #F5EAD6;
+    --teal: #2A8F86;
+    --teal-wash: #E1EFEE;
+    --rust: #AE4A2E;
+    --rust-wash: #F5E5DF;
+    --shadow: 0 1px 2px rgba(23,27,32,.05), 0 6px 20px -8px rgba(23,27,32,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10141A; --surface: #171D25; --surface-2: #1E2530;
+      --ink: #E7E9EC; --ink-soft: #A2ABB8; --ink-faint: #6C7684;
+      --border: #2B3440; --border-strong: #3A4552;
+      --accent: #8AAAE0; --accent-strong: #B2CCF3; --accent-wash: #1C2836;
+      --gold: #E3AD52; --gold-wash: #2C2415;
+      --teal: #55C2B7; --teal-wash: #142623;
+      --rust: #E2795A; --rust-wash: #2B1C16;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -8px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10141A; --surface: #171D25; --surface-2: #1E2530;
+    --ink: #E7E9EC; --ink-soft: #A2ABB8; --ink-faint: #6C7684;
+    --border: #2B3440; --border-strong: #3A4552;
+    --accent: #8AAAE0; --accent-strong: #B2CCF3; --accent-wash: #1C2836;
+    --gold: #E3AD52; --gold-wash: #2C2415;
+    --teal: #55C2B7; --teal-wash: #142623;
+    --rust: #E2795A; --rust-wash: #2B1C16;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -8px rgba(0,0,0,.5);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px; line-height: 1.62;
+  }
+  ::selection { background: var(--accent-wash); color: var(--accent-strong); }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; color: var(--ink); font-weight: 600; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .87em; background: var(--surface-2); padding: .1em .4em; border-radius: 4px; }
+  a { color: var(--accent); }
+
+  nav.top {
+    position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 4px;
+    padding: 10px 20px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); overflow-x: auto;
+  }
+  nav.top .brand { font-family: "Fraunces", serif; font-weight: 600; font-size: 15px; margin-right: 14px; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+  nav.top .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); flex: none; }
+  nav.top a.tab { font-size: 13px; color: var(--ink-soft); text-decoration: none; white-space: nowrap; padding: 6px 11px; border-radius: 7px; transition: background .15s, color .15s; }
+  nav.top a.tab:hover { background: var(--surface-2); color: var(--ink); }
+
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero { padding: 60px 0 40px; border-bottom: 1px solid var(--border); }
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .eyebrow::before { content: ""; width: 22px; height: 1.5px; background: var(--accent); display: inline-block; }
+  header.hero h1 { font-size: clamp(32px, 5.2vw, 50px); line-height: 1.06; margin: 0 0 18px; letter-spacing: -0.015em; }
+  header.hero .dek { font-size: 18px; color: var(--ink-soft); max-width: 60ch; margin: 0 0 28px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 12.5px; color: var(--ink-faint); font-family: "IBM Plex Mono", monospace; }
+  .meta-row b { color: var(--ink-soft); font-weight: 500; }
+
+  section { padding: 50px 0; border-bottom: 1px solid var(--border); }
+  .section-head { margin-bottom: 26px; }
+  .section-head .eyebrow { margin-bottom: 10px; }
+  .section-head h2 { font-size: 27px; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .section-head p { color: var(--ink-soft); max-width: 66ch; margin: 0; font-size: 15.5px; }
+
+  p { margin: 0 0 15px; max-width: 68ch; }
+  .lead { font-size: 17px; }
+  ul.clean { margin: 0 0 16px; padding-left: 20px; max-width: 68ch; }
+  ul.clean li { margin-bottom: 8px; }
+  ul.clean li::marker { color: var(--accent); }
+
+  .abstract { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 0 12px 12px 0; padding: 22px 26px; box-shadow: var(--shadow); }
+  .abstract p { margin-bottom: 12px; }
+  .abstract p:last-child { margin-bottom: 0; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin: 26px 0 8px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 17px; box-shadow: var(--shadow); }
+  .tile .big { font-family: "IBM Plex Mono", monospace; font-size: 27px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1; }
+  .tile .cap { font-size: 12px; color: var(--ink-soft); margin-top: 8px; line-height: 1.35; }
+
+  .table-scroll { overflow-x: auto; margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 440px; }
+  th, td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); font-weight: 500; }
+  td { color: var(--ink); font-variant-numeric: tabular-nums; }
+  td.num, th.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  tr.hl td { color: var(--accent-strong); font-weight: 600; }
+  caption { caption-side: bottom; text-align: left; font-size: 11.5px; color: var(--ink-faint); padding-top: 10px; font-style: italic; }
+
+  .callout { border-left: 3px solid var(--teal); background: var(--teal-wash); padding: 13px 17px; border-radius: 0 8px 8px 0; font-size: 14.5px; margin: 18px 0; }
+  .callout b { color: var(--teal); }
+  .callout.gold { border-color: var(--gold); background: var(--gold-wash); }
+  .callout.gold b { color: var(--gold); }
+  .callout.rust { border-color: var(--rust); background: var(--rust-wash); }
+  .callout.rust b { color: var(--rust); }
+
+  /* diagram */
+  .diagram-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px 18px 6px; box-shadow: var(--shadow); overflow-x: auto; margin: 8px 0 4px; }
+  .diagram-card svg { display: block; margin: 0 auto; width: 100%; max-width: 600px; height: auto; }
+  .dn rect { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.4; }
+  .dn.gen rect { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.6; }
+  .dn.judge rect { fill: var(--gold-wash); stroke: var(--gold); stroke-width: 1.8; }
+  .dn.final rect { fill: var(--teal-wash); stroke: var(--teal); stroke-width: 1.8; }
+  .dn .t { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: 13px; fill: var(--ink); }
+  .dn .s { font-family: "IBM Plex Mono", monospace; font-size: 10px; fill: var(--ink-soft); }
+  .df { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+  .dl { fill: none; stroke: var(--rust); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .dcap { font-family: "IBM Plex Sans", sans-serif; font-style: italic; font-size: 11px; fill: var(--ink-faint); }
+  .dtag { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; font-weight: 600; }
+
+  .weights { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 4px; }
+  .wchip { display: flex; align-items: baseline; gap: 7px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 13px 6px 8px; font-size: 12.5px; }
+  .wchip .sw { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .wchip .n { font-family: "IBM Plex Mono", monospace; font-weight: 600; }
+  .wchip .l { color: var(--ink-soft); }
+
+  /* phase timeline */
+  .phase { position: relative; padding: 0 0 34px 52px; }
+  .phase:last-child { padding-bottom: 0; }
+  .phase::before { content: ""; position: absolute; left: 17px; top: 38px; bottom: -4px; width: 1.5px; background: var(--border); }
+  .phase:last-child::before { display: none; }
+  .phase .pn { position: absolute; left: 0; top: 0; width: 36px; height: 36px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--accent); color: var(--accent); font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .phase h3 { font-size: 18.5px; margin: 3px 0 8px; }
+  .phase .verdict { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 5px 12px; background: var(--accent-wash); color: var(--accent-strong); border-radius: 8px; font-size: 13px; font-weight: 500; }
+  .phase .verdict::before { content: "→"; font-weight: 700; }
+
+  .split { margin: 14px 0; }
+  .split .sl { font-size: 12px; color: var(--ink-faint); font-family: "IBM Plex Mono", monospace; margin-bottom: 5px; }
+  .strack { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+  .sseg { display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600; color: #fff; }
+
+  footer { padding: 34px 0 64px; text-align: center; color: var(--ink-faint); font-size: 12.5px; }
+  footer a { color: var(--ink-soft); }
+
+  @media (max-width: 640px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    header.hero { padding: 40px 0 30px; }
+  }
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<nav class="top">
+  <span class="brand"><span class="dot"></span>Multi-LLM Validation</span>
+  <a class="tab" href="#abstract">Abstract</a>
+  <a class="tab" href="#problem">Problem</a>
+  <a class="tab" href="#architecture">Architecture</a>
+  <a class="tab" href="#method">Method</a>
+  <a class="tab" href="#findings">Findings</a>
+  <a class="tab" href="#limits">Limitations</a>
+  <a class="tab" href="#contrib">Contributions</a>
+  <a class="tab" href="#future">Future work</a>
+</nav>
+
+<header class="hero wrap">
+  <div class="eyebrow">Final-Year Project · Technical Report</div>
+  <h1>An Agentic Multi-LLM Answer-Validation System</h1>
+  <p class="dek">A pipeline that generates answers from two language models, evaluates them with two more under a bias-controlled protocol, corroborates against external knowledge, and gates its own output on a statistically calibrated confidence score — built and validated end-to-end over a 5,000-question run.</p>
+  <div class="meta-row">
+    <span><b>Status</b> Data collection complete</span>
+    <span><b>Dataset</b> 5,000 questions · 8,432 attempts</span>
+    <span><b>Judge</b> qwen3.5:9b</span>
+    <span><b>Verifier</b> phi3</span>
+    <span><b>Generators</b> LLaMA 3 · Mistral</span>
+  </div>
+</header>
+
+<section id="abstract" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">01 · Abstract</div>
+    <h2>What was built, and what was found</h2>
+  </div>
+  <div class="abstract">
+    <p class="lead">This project builds a six-stage agentic pipeline that answers open-ended technical questions and validates the answer without any human-labelled ground truth. Two independent models generate candidate answers; two further models score them on a shared eight-factor rubric; three external checks corroborate the winner; and a weighted confidence score decides whether the answer ships or is regenerated.</p>
+    <p>The central research problem is that <b>none of the usual quality metrics apply</b>: there is no "correct answer" label anywhere in the data, so every design choice — which judge model, what rubric, which signals, what confidence threshold — had to be justified by <i>internal, label-free evidence</i> rather than accuracy against a target. The project's real contribution is the method for doing that credibly, and a running record of catching its own measurement errors before they became conclusions.</p>
+    <p>The completed dataset spans 5,000 questions under one consistent, bias-corrected regime. Key results: a judge model selected on per-criterion discrimination (not just score averages); position and model-identity bias identified and eliminated; and a regeneration threshold of 0.75 that three independent statistical methods agree is well-calibrated.</p>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="big">5,000</div><div class="cap">Questions, single consistent regime</div></div>
+    <div class="tile"><div class="big">6</div><div class="cap">Pipeline stages, fully instrumented</div></div>
+    <div class="tile"><div class="big">3</div><div class="cap">Judge models evaluated before selection</div></div>
+    <div class="tile"><div class="big">0.75</div><div class="cap">Confidence threshold, statistically proven</div></div>
+  </div>
+</section>
+
+<section id="problem" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">02 · Problem statement</div>
+    <h2>Validating answers when there is no answer key</h2>
+    <p>A single language model, asked a hard question, will produce a fluent answer whether or not it is correct — and it cannot reliably tell you which. That is the gap this project addresses.</p>
+  </div>
+  <p>The naive fix — have a second model "check" the first — fails quietly, because a checker model shares the same failure modes and biases as the generator, and tends to rubber-stamp plausible-sounding text. Any system built this way needs to answer three uncomfortable questions:</p>
+  <ul class="clean">
+    <li><b>How do you know the judge is any good?</b> An LLM judge that scores every answer 76/80 is useless, no matter how confident it sounds.</li>
+    <li><b>How do you know the scores measure quality, not artefacts?</b> Position on the page, apparent verbosity, or which brand wrote an answer can all leak into a score and masquerade as quality.</li>
+    <li><b>How do you set a "good enough" bar without a ground-truth label to calibrate against?</b></li>
+  </ul>
+  <p>Because there is no labelled correctness signal in this domain, none of these can be answered by measuring accuracy. Each had to be answered by a purpose-built, label-free experiment — which is what the bulk of this project consisted of.</p>
+</section>
+
+<section id="architecture" class="wide">
+  <div class="wrap section-head" style="padding:0;max-width:66ch;">
+    <div class="eyebrow">03 · System architecture</div>
+    <h2>The six-stage pipeline</h2>
+    <p>Every question flows through generation, blind dual evaluation, three-way corroboration, and a confidence gate. A per-question coin flip decides answer order before either evaluator sees the pair, so neither position nor brand identity can leak into a score.</p>
+  </div>
+
+  <div class="diagram-card">
+    <svg viewBox="0 0 620 760" role="img" aria-label="Pipeline: user question splits to LLaMA 3 and Mistral generation, then blind Verifier and Judge evaluation, three external checks, a weighted confidence score, a 0.75 decision gate with a regeneration loop, and a combiner producing the final answer.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--border-strong)"></path></marker>
+        <marker id="arR" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--rust)"></path></marker>
+      </defs>
+      <!-- flows -->
+      <path class="df" marker-end="url(#ar)" d="M310,62 L310,80 L165,80 L165,98"></path>
+      <path class="df" marker-end="url(#ar)" d="M310,62 L310,80 L455,80 L455,98"></path>
+      <line class="df" marker-end="url(#ar)" x1="165" y1="150" x2="165" y2="200"></line>
+      <line class="df" marker-end="url(#ar)" x1="455" y1="150" x2="455" y2="200"></line>
+      <path class="df" marker-end="url(#ar)" d="M165,252 L165,270 L310,270 L310,288"></path>
+      <path class="df" marker-end="url(#ar)" d="M455,252 L455,270 L310,270 L310,288"></path>
+      <path class="df" marker-end="url(#ar)" d="M310,340 L310,358 L120,358 L120,384"></path>
+      <line class="df" marker-end="url(#ar)" x1="310" y1="340" x2="310" y2="384"></line>
+      <path class="df" marker-end="url(#ar)" d="M310,340 L310,358 L500,358 L500,384"></path>
+      <path class="df" marker-end="url(#ar)" d="M120,436 L120,454 L310,454 L310,472"></path>
+      <line class="df" marker-end="url(#ar)" x1="310" y1="436" x2="310" y2="472"></line>
+      <path class="df" marker-end="url(#ar)" d="M500,436 L500,454 L310,454 L310,472"></path>
+      <line class="df" marker-end="url(#ar)" x1="310" y1="524" x2="310" y2="556"></line>
+      <line class="df" marker-end="url(#ar)" x1="310" y1="648" x2="310" y2="680"></line>
+      <text x="326" y="672" class="dtag" fill="var(--teal)">YES</text>
+      <!-- loop -->
+      <path class="dl" marker-end="url(#arR)" d="M215,602 L48,602 L48,124 L38,124"></path>
+      <text x="205" y="596" class="dtag" fill="var(--rust)" text-anchor="end">NO</text>
+      <text x="58" y="365" class="dcap" transform="rotate(-90 58 365)" text-anchor="middle">regenerate · up to 3 attempts</text>
+      <text x="310" y="170" text-anchor="middle" class="dcap">answer order is a fresh coin-flip per question — evaluators never see which brand wrote which</text>
+
+      <g class="dn"><rect x="200" y="14" width="220" height="48" rx="11"></rect><text x="310" y="34" text-anchor="middle" class="t">User Question</text><text x="310" y="51" text-anchor="middle" class="s">open-ended, technical</text></g>
+      <g class="dn gen"><rect x="35" y="98" width="260" height="52" rx="11"></rect><text x="165" y="119" text-anchor="middle" class="t">LLaMA 3</text><text x="165" y="137" text-anchor="middle" class="s">generates a candidate</text></g>
+      <g class="dn gen"><rect x="325" y="98" width="260" height="52" rx="11"></rect><text x="455" y="119" text-anchor="middle" class="t">Mistral</text><text x="455" y="137" text-anchor="middle" class="s">generates a candidate</text></g>
+      <g class="dn"><rect x="35" y="200" width="260" height="52" rx="11"></rect><text x="165" y="221" text-anchor="middle" class="t">Verifier — phi3</text><text x="165" y="239" text-anchor="middle" class="s">8-factor rubric · blind</text></g>
+      <g class="dn"><rect x="325" y="200" width="260" height="52" rx="11"></rect><text x="455" y="221" text-anchor="middle" class="t">Similarity Scorer</text><text x="455" y="239" text-anchor="middle" class="s">cosine, question ↔ answer</text></g>
+      <g class="dn judge"><rect x="165" y="288" width="290" height="52" rx="11"></rect><text x="310" y="309" text-anchor="middle" class="t">Judge — qwen3.5:9b</text><text x="310" y="327" text-anchor="middle" class="s">8-factor + winner · blind · reasoning off</text></g>
+      <g class="dn"><rect x="35" y="384" width="170" height="52" rx="11"></rect><text x="120" y="405" text-anchor="middle" class="t">Model Agreement</text><text x="120" y="423" text-anchor="middle" class="s">BERTScore(A,B)</text></g>
+      <g class="dn"><rect x="225" y="384" width="170" height="52" rx="11"></rect><text x="310" y="405" text-anchor="middle" class="t">Wikipedia</text><text x="310" y="423" text-anchor="middle" class="s">relevance-gated</text></g>
+      <g class="dn"><rect x="415" y="384" width="170" height="52" rx="11"></rect><text x="500" y="405" text-anchor="middle" class="t">Wikidata</text><text x="500" y="423" text-anchor="middle" class="s">entity match, gated</text></g>
+      <g class="dn"><rect x="165" y="472" width="290" height="52" rx="11"></rect><text x="310" y="493" text-anchor="middle" class="t">Weighted Confidence</text><text x="310" y="511" text-anchor="middle" class="s">6 signals → one 0–1 score</text></g>
+      <g><polygon points="310,556 410,602 310,648 210,602" fill="var(--gold-wash)" stroke="var(--gold)" stroke-width="1.8"></polygon><text x="310" y="598" text-anchor="middle" class="mono" font-size="12.5" font-weight="600" fill="var(--ink)">score ≥</text><text x="310" y="614" text-anchor="middle" class="mono" font-size="12.5" font-weight="600" fill="var(--ink)">0.75 ?</text></g>
+      <g class="dn"><rect x="185" y="680" width="250" height="48" rx="11"></rect><text x="310" y="700" text-anchor="middle" class="t">Combiner → Final Answer</text><text x="310" y="717" text-anchor="middle" class="s">synthesised from the best attempt</text></g>
+    </svg>
+  </div>
+
+  <div class="wrap" style="padding:0;max-width:66ch;">
+    <p style="margin-top:20px;">The confidence score is a weighted blend of six signals. The judge's rubric total carries the most weight, but never a majority — the design deliberately spreads trust across independent sources so no single evaluator dominates:</p>
+    <div class="weights">
+      <span class="wchip"><span class="sw" style="background:var(--accent)"></span><span class="n">0.40</span><span class="l">judge</span></span>
+      <span class="wchip"><span class="sw" style="background:var(--teal)"></span><span class="n">0.15</span><span class="l">similarity</span></span>
+      <span class="wchip"><span class="sw" style="background:var(--teal)"></span><span class="n">0.15</span><span class="l">wikipedia</span></span>
+      <span class="wchip"><span class="sw" style="background:var(--gold)"></span><span class="n">0.10</span><span class="l">model agreement</span></span>
+      <span class="wchip"><span class="sw" style="background:var(--gold)"></span><span class="n">0.10</span><span class="l">verifier–judge agreement</span></span>
+      <span class="wchip"><span class="sw" style="background:var(--teal)"></span><span class="n">0.10</span><span class="l">wikidata</span></span>
+    </div>
+    <p style="margin-top:14px; font-size:13.5px; color:var(--ink-soft);">Any signal that is unavailable for a given question (e.g. no relevant Wikipedia article) has its weight redistributed across the rest, so the score stays valid rather than penalising the answer for a missing external source.</p>
+  </div>
+</section>
+
+<section id="method" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">04 · Methodology</div>
+    <h2>Evidence over intuition, at every fork</h2>
+    <p>The defining discipline of the project: no component was adopted, and no parameter set, until a label-free experiment justified it — and results were re-checked whenever a measurement looked too clean to trust.</p>
+  </div>
+  <p>With no correctness labels, two families of label-free objective were used throughout:</p>
+  <ul class="clean">
+    <li><b>Discrimination.</b> A usable evaluator must score a deliberately broken answer far below a solid one. This single test repeatedly separated genuinely useful models from ones that merely produced plausible numbers.</li>
+    <li><b>Internal consistency &amp; regeneration validity.</b> Signals should predict one another (a weighting where they don't is capturing noise), and a confidence threshold should trigger a retry mainly when a second attempt genuinely improves the answer.</li>
+  </ul>
+  <p>Crucially, the same rigour was turned inward. Three separate times, an analysis produced a striking result that turned out to be a measurement bug — a model's own arithmetic error, a signal secretly derived from the thing it was being correlated against, and a sampling scheme that under-counted part of the data. In every case the error was caught and corrected <i>before</i> the result was reported as a finding, not after. That self-correction record is itself part of the methodology.</p>
+  <div class="callout"><b>Design rule enforced throughout:</b> whenever the judge model or scoring standard changed, the dataset was restarted from scratch. Mixing two labelling regimes in one dataset — a mistake made early and never repeated — teaches any downstream analysis to average two disagreeing standards. The final 5,000 questions are all under one regime.</div>
+</section>
+
+<section id="findings" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">05 · Key findings &amp; results</div>
+    <h2>Five results that shaped the system</h2>
+    <p>Each was a decision point backed by a real, dated experiment. Presented here in the order the system was hardened.</p>
+  </div>
+
+  <div class="phase">
+    <div class="pn">1</div>
+    <h3>Judge selection: check per-criterion variance, not just averages</h3>
+    <p>Three judge models were trialled. The decisive test was not their average score but whether they discriminated between the <i>eight rubric criteria</i>. CompassJudger-1 looked competitive on totals, yet on a majority of answers it gave all eight criteria the identical score — a flat guess dressed as analysis. qwen3.5:9b never did this.</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Judge model</th><th class="num">Mean / 80</th><th class="num">Flat-rate (all 8 identical)</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr><td>qwen2.5</td><td class="num">71.9</td><td class="num">—</td><td>Ceiling-hugging bias</td></tr>
+          <tr><td>CompassJudger-1-7B</td><td class="num">69.3</td><td class="num">57.5%</td><td>Not discriminating criteria</td></tr>
+          <tr class="hl"><td>qwen3.5:9b (reasoning off)</td><td class="num">65.5</td><td class="num">0.0%</td><td>Adopted</td></tr>
+        </tbody>
+        <caption>N = 40 blind evaluations per model. The similar averages hid a decisive difference only visible per-criterion.</caption>
+      </table>
+    </div>
+    <div class="verdict">Judge = qwen3.5:9b, internal reasoning disabled</div>
+  </div>
+
+  <div class="phase">
+    <div class="pn">2</div>
+    <h3>The judge was silently copying the verifier</h3>
+    <p>A routine check found that on 32 of 37 questions, the judge's eight scores matched the verifier's <i>exactly</i>, digit for digit. The judge's prompt was being handed the verifier's numbers as "context," and at low temperature it reproduced them instead of forming an independent view — meaning the "two independent evaluators agree" signal was measuring copying, not agreement. Fixed by scoring the judge fully blind, with no verifier output in its prompt.</p>
+    <div class="verdict">Judge and verifier now score independently — agreement became a real signal</div>
+  </div>
+
+  <div class="phase">
+    <div class="pn">3</div>
+    <h3>Position and identity bias was baked into the whole dataset</h3>
+    <p>Until identified, LLaMA 3 was always presented as "Answer 1" and the prompts explicitly named which brand wrote each answer. Position and identity were confounded in the same direction for every question ever generated. The fix was four-layered: strip all brand labels from prompts, randomise answer order per question by coin flip, record true model identity in new columns, and mirror the same randomisation in the live demo.</p>
+    <div class="split">
+      <div class="sl">Win-rate by raw position — inflated by the order artefact</div>
+      <div class="strack"><div class="sseg" style="width:35.2%;background:var(--accent)">A 35.2%</div><div class="sseg" style="width:64.8%;background:var(--gold)">B 64.8%</div></div>
+    </div>
+    <div class="split">
+      <div class="sl">Win-rate by true model identity — the real, much smaller gap</div>
+      <div class="strack"><div class="sseg" style="width:44.7%;background:var(--accent)">LLaMA 3 44.7%</div><div class="sseg" style="width:55.3%;background:var(--gold)">Mistral 55.3%</div></div>
+    </div>
+    <p style="margin-top:14px;">Separating the two effects for the first time revealed a residual order bias (the judge mildly favours whichever answer it reads second) sitting on top of a genuine, modest Mistral edge — a cleaner result than was possible while the two were confounded.</p>
+    <div class="verdict">Every prompt is brand-blind; position is randomised and tracked</div>
+  </div>
+
+  <div class="phase">
+    <div class="pn">4</div>
+    <h3>The confidence threshold, proven three ways</h3>
+    <p>The retry threshold could not be calibrated on ordinary data — a second attempt is only ever generated below the threshold, so the data above it is censored. A control group was introduced (a small random fraction of already-passing answers get a second attempt purely for measurement), which supplied unbiased data across the whole score range. Three independent methods then converged:</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Method</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Two-proportion z-test (score bands)</td><td>p = 0.011 — the improvement drop-off is real</td></tr>
+          <tr><td>ROC / Youden's J (sampling-corrected)</td><td>optimal cutoff 0.70–0.74, AUC 0.63</td></tr>
+          <tr class="hl"><td>2,000-sample bootstrap</td><td>95% CI [0.69, 0.75] — 0.75 confirmed in-range</td></tr>
+        </tbody>
+        <caption>Re-run against the complete 5,000-question dataset. 0.75 sits inside the confidence interval on a broad near-optimal plateau.</caption>
+      </table>
+    </div>
+    <div class="verdict">Threshold = 0.75, raised from an initial 0.68 and validated at completion scale</div>
+  </div>
+
+  <div class="phase">
+    <div class="pn">5</div>
+    <h3>Is the Mistral edge real? An honest, still-open answer</h3>
+    <p>The judge rates Mistral's answers higher specifically on factual correctness, faithfulness, and hallucination-freedom. But the independent verifier, scoring the same pairs, shows <i>no</i> gap on any criterion. A discrimination test confirmed the verifier is not simply blind — it scored a solid answer 77–80/80 against a deliberately broken one at 0–8/80 (average gap 74.5). So its flat reading is a genuine "no measurable difference," which shifts the balance of evidence toward the judge's preference being a model-specific perception rather than a true quality gap.</p>
+    <div class="verdict">Reported as an open question, with the evidence for both readings laid out — not forced to a conclusion</div>
+  </div>
+</section>
+
+<section id="limits" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">06 · Limitations</div>
+    <h2>What this project does not claim</h2>
+    <p>Stated plainly, because a defensible project is precise about the edges of its evidence.</p>
+  </div>
+  <ul class="clean">
+    <li><b>No ground-truth accuracy.</b> Every result is internal/label-free by necessity. The system measures self-consistency and corroboration, not verified correctness against an external answer key.</li>
+    <li><b>The Mistral preference is unresolved.</b> Whether it reflects real quality or a judge artefact cannot be settled without per-answer fact-checking that does not exist at this scale.</li>
+    <li><b>The verifier (phi3) was never swapped.</b> It clusters near the score ceiling on ordinary answers; it discriminates broken answers well, but it has not been held to the same model-comparison scrutiny the judge received.</li>
+    <li><b>External fact-checks are partial by design.</b> Wikipedia matched 54% of questions and Wikidata 41% — the relevance gate correctly abstains when no genuinely related source exists, rather than injecting noise.</li>
+    <li><b>Generalisation is untested.</b> Findings are specific to this model set, this rubric, and this question bank; they are not claimed to transfer unchanged to other models or domains.</li>
+  </ul>
+</section>
+
+<section id="contrib" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">07 · Contributions</div>
+    <h2>Why the work stands up</h2>
+  </div>
+  <p>The deliverable is not merely "a pipeline that runs." It is a demonstrated, repeatable method for building and defending an evaluation system where no ground truth exists:</p>
+  <ul class="clean">
+    <li>A <b>label-free validation protocol</b> — discrimination tests plus internal-consistency and regeneration-validity objectives — that made every model and parameter choice falsifiable.</li>
+    <li>A <b>bias-control design</b> (blind, order-randomised, identity-tracked evaluation) that separates genuine quality signal from position and brand artefacts, and quantifies each.</li>
+    <li>A <b>statistically calibrated confidence gate</b>, with the censored-data problem solved by a purpose-built control group rather than assumed away.</li>
+    <li>A fully instrumented <b>5,000-question dataset</b> storing every raw signal for every attempt, so any future weighting or threshold can be re-derived without regenerating data.</li>
+    <li>A transparent record of <b>three self-caught measurement errors</b>, each corrected before it became a claim — the strongest evidence that the reported results are trustworthy.</li>
+  </ul>
+</section>
+
+<section id="future" class="wrap">
+  <div class="section-head">
+    <div class="eyebrow">08 · Future work &amp; the open scope decision</div>
+    <h2>Where this can go next</h2>
+    <p>Data collection is complete. The remaining direction is a genuine choice about the project's scope, laid out here for a decision.</p>
+  </div>
+  <div class="callout gold"><b>The scope question:</b> is the 5,000-question dataset the final deliverable, or the raw material for a next phase? The pipeline and dataset stand on their own as a complete FYP. But the same data could seed a follow-on: training or fine-tuning a lightweight "confidence predictor" that reproduces the six-signal judgment in one cheap pass, or distilling the multi-model ensemble into a single model. That is a scope expansion, not a gap in the current work.</div>
+  <p style="margin-top:20px;">Independently of that decision, three concrete threads remain open:</p>
+  <ul class="clean">
+    <li><b>Hold the verifier to the same scrutiny as the judge</b> — run the full model-comparison it never received, given its near-ceiling clustering on ordinary answers.</li>
+    <li><b>Resolve the Mistral question</b> with a per-answer external fact-check on a sampled subset, the one piece of ground truth that would settle it.</li>
+    <li><b>Calibrate the RAG relevance gate</b> — retrieval logging is now in place, so with real usage the 0.35 cutoff can be swept the same way the confidence threshold was.</li>
+  </ul>
+</section>
+
+<footer class="wrap">
+  Agentic Multi-LLM Validation System · Final-Year Project technical report · condensed from a 34-entry research log<br>
+  Full methodology, dated experiments, and source in the project repository.
+</footer>

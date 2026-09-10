@@ -1,0 +1,242 @@
+<title>Defending the Judge</title>
+<style>
+  :root {
+    --bg: #EDEFF0; --surface: #FFFFFF; --surface-2: #E3E7EA;
+    --ink: #171B20; --ink-soft: #4E5763; --ink-faint: #838B96;
+    --border: #D3D8DC; --border-strong: #B7BEC5;
+    --accent: #33507D; --accent-strong: #223B60; --accent-wash: #E4E9F1;
+    --gold: #B9812A; --gold-wash: #F5EAD6;
+    --teal: #2A8F86; --teal-wash: #E1EFEE;
+    --rust: #AE4A2E; --rust-wash: #F5E5DF;
+    --shadow: 0 1px 2px rgba(23,27,32,.05), 0 6px 20px -8px rgba(23,27,32,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10141A; --surface: #171D25; --surface-2: #1E2530;
+      --ink: #E7E9EC; --ink-soft: #A2ABB8; --ink-faint: #6C7684;
+      --border: #2B3440; --border-strong: #3A4552;
+      --accent: #8AAAE0; --accent-strong: #B2CCF3; --accent-wash: #1C2836;
+      --gold: #E3AD52; --gold-wash: #2C2415;
+      --teal: #55C2B7; --teal-wash: #142623;
+      --rust: #E2795A; --rust-wash: #2B1C16;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -8px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10141A; --surface: #171D25; --surface-2: #1E2530;
+    --ink: #E7E9EC; --ink-soft: #A2ABB8; --ink-faint: #6C7684;
+    --border: #2B3440; --border-strong: #3A4552;
+    --accent: #8AAAE0; --accent-strong: #B2CCF3; --accent-wash: #1C2836;
+    --gold: #E3AD52; --gold-wash: #2C2415;
+    --teal: #55C2B7; --teal-wash: #142623;
+    --rust: #E2795A; --rust-wash: #2B1C16;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -8px rgba(0,0,0,.5);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--ink); font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 16px; line-height: 1.6; }
+  ::selection { background: var(--accent-wash); color: var(--accent-strong); }
+  h1, h2, h3 { font-family: "Fraunces", Georgia, serif; text-wrap: balance; font-weight: 600; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .87em; background: var(--surface-2); padding: .1em .4em; border-radius: 4px; }
+
+  nav.top { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 4px; padding: 10px 20px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); overflow-x: auto; }
+  nav.top .brand { font-family: "Fraunces", serif; font-weight: 600; font-size: 15px; margin-right: 14px; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+  nav.top .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rust); flex: none; }
+  nav.top a.tab { font-size: 13px; color: var(--ink-soft); text-decoration: none; white-space: nowrap; padding: 6px 11px; border-radius: 7px; transition: background .15s, color .15s; }
+  nav.top a.tab:hover { background: var(--surface-2); color: var(--ink); }
+
+  .wrap { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero { padding: 56px 0 38px; border-bottom: 1px solid var(--border); }
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--rust); display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .eyebrow::before { content: ""; width: 22px; height: 1.5px; background: var(--rust); display: inline-block; }
+  header.hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.07; margin: 0 0 16px; letter-spacing: -0.015em; }
+  header.hero .dek { font-size: 17.5px; color: var(--ink-soft); max-width: 62ch; margin: 0; }
+
+  section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+  .section-head { margin-bottom: 24px; }
+  .section-head h2 { font-size: 26px; margin: 0 0 9px; letter-spacing: -0.01em; }
+  .section-head p { color: var(--ink-soft); max-width: 66ch; margin: 0; font-size: 15px; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+
+  /* 60-second pitch */
+  .pitch { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 0 12px 12px 0; padding: 22px 26px; box-shadow: var(--shadow); font-size: 16.5px; line-height: 1.66; }
+  .pitch b { color: var(--accent-strong); }
+
+  /* flow steps */
+  .flow { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; counter-reset: step; }
+  .fstep { display: flex; gap: 15px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .fstep:last-child { border-bottom: none; }
+  .fstep .fn { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-wash); color: var(--accent-strong); font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 12.5px; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+  .fstep .fbody { font-size: 14.5px; }
+  .fstep .fbody b { display: block; color: var(--ink); margin-bottom: 1px; }
+  .fstep .fbody span { color: var(--ink-soft); }
+
+  /* Q&A cards */
+  .qa { display: flex; flex-direction: column; gap: 14px; }
+  .qcard { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .qcard .q { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 16.5px; color: var(--ink); margin-bottom: 10px; display: flex; gap: 9px; align-items: baseline; }
+  .qcard .q .mark { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--rust); font-weight: 600; flex: none; }
+  .qcard .a { font-size: 14.5px; color: var(--ink-soft); }
+  .qcard .a strong { color: var(--ink); font-weight: 600; }
+  .qcard .a .lead-in { color: var(--teal); font-weight: 600; }
+  .qcard .tag { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 3px 8px; border-radius: 5px; background: var(--surface-2); color: var(--ink-faint); margin-bottom: 12px; }
+
+  .trap { border-left: 3px solid var(--gold); background: var(--gold-wash); padding: 12px 16px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin-top: 12px; }
+  .trap b { color: var(--gold); }
+
+  /* number strip */
+  .numbers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 6px 0; }
+  .nchip { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+  .nchip .v { font-family: "IBM Plex Mono", monospace; font-size: 22px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .nchip .k { font-size: 11.5px; color: var(--ink-soft); margin-top: 5px; line-height: 1.3; }
+
+  ul.clean { margin: 0 0 8px; padding-left: 20px; max-width: 68ch; }
+  ul.clean li { margin-bottom: 7px; font-size: 14.5px; color: var(--ink-soft); }
+  ul.clean li::marker { color: var(--rust); }
+  ul.clean li b { color: var(--ink); }
+
+  footer { padding: 32px 0 60px; text-align: center; color: var(--ink-faint); font-size: 12.5px; }
+
+  @media (max-width: 640px) { .numbers { grid-template-columns: repeat(2, 1fr); } header.hero { padding: 40px 0 30px; } }
+</style>
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<nav class="top">
+  <span class="brand"><span class="dot"></span>Defense Prep</span>
+  <a class="tab" href="#pitch">60-sec pitch</a>
+  <a class="tab" href="#walk">Walkthrough</a>
+  <a class="tab" href="#numbers">Numbers</a>
+  <a class="tab" href="#qa">Q&amp;A</a>
+  <a class="tab" href="#closers">Closers</a>
+</nav>
+
+<header class="hero wrap">
+  <div class="eyebrow">Final-Year Project · Viva / Defense Preparation</div>
+  <h1>Defending the Project</h1>
+  <p class="dek">Everything you need to walk into the room ready: a one-minute pitch, a clean spoken walkthrough of the system, the numbers that matter committed to memory, and honest, panel-tested answers to the questions you will actually be asked — including the hard ones.</p>
+</header>
+
+<section id="pitch" class="wrap">
+  <div class="section-head">
+    <h2>The 60-second opening</h2>
+    <p>If you say nothing else, say this. It frames the project on your strongest ground before any question is asked.</p>
+  </div>
+  <div class="pitch">
+    "The problem I set out to solve is that a language model can't reliably tell you whether its own answer is correct — and in my domain there's <b>no answer key to check against</b>. So I built a pipeline where two models generate answers, two more evaluate them blindly on a shared rubric, and three external checks corroborate the result, all combined into one confidence score that decides whether to ship the answer or try again.<br><br>The hard part wasn't building it — it was <b>proving each piece works without any ground-truth labels</b>. Every model choice, every parameter, is backed by a label-free experiment. And along the way I caught three of my own measurement errors before they became conclusions — which is the real reason I trust the results I'm about to show you."
+  </div>
+</section>
+
+<section id="walk" class="wrap">
+  <div class="section-head">
+    <h2>The spoken walkthrough</h2>
+    <p>Six steps, one sentence each. Practise until it's smooth — this is your "explain your system" answer.</p>
+  </div>
+  <div class="flow">
+    <div class="fstep"><div class="fn">1</div><div class="fbody"><b>Two models generate, independently</b><span>LLaMA 3 and Mistral each answer the question from scratch — two independent shots, not one.</span></div></div>
+    <div class="fstep"><div class="fn">2</div><div class="fbody"><b>A verifier scores both, blind</b><span>phi3 rates each answer on eight rubric criteria — factual correctness, faithfulness, hallucination-freedom, and so on — without knowing which model wrote it.</span></div></div>
+    <div class="fstep"><div class="fn">3</div><div class="fbody"><b>A separate judge scores again and picks a winner</b><span>qwen3.5:9b does the same eight-factor scoring completely independently, then declares a winner — the two independent evaluations let me measure whether they agree.</span></div></div>
+    <div class="fstep"><div class="fn">4</div><div class="fbody"><b>Three external checks corroborate</b><span>Cross-model agreement, plus live Wikipedia and Wikidata lookups, both gated so an irrelevant source is never trusted.</span></div></div>
+    <div class="fstep"><div class="fn">5</div><div class="fbody"><b>Six signals become one confidence score</b><span>A weighted blend, no single signal dominating, produces a 0–1 confidence — and if it's below 0.75, the whole thing regenerates.</span></div></div>
+    <div class="fstep"><div class="fn">6</div><div class="fbody"><b>A combiner writes the final answer</b><span>The best attempt is synthesised into the answer that ships — and every raw signal from every attempt is logged for analysis.</span></div></div>
+  </div>
+</section>
+
+<section id="numbers" class="wrap">
+  <div class="section-head">
+    <h2>Numbers to have memorised</h2>
+    <p>Panels trust candidates who quote their own figures without hunting for them. These are the ones worth knowing cold.</p>
+  </div>
+  <div class="numbers">
+    <div class="nchip"><div class="v">5,000</div><div class="k">questions, one consistent regime</div></div>
+    <div class="nchip"><div class="v">8,432</div><div class="k">total attempts logged</div></div>
+    <div class="nchip"><div class="v">0.75</div><div class="k">confidence threshold, CI [0.69, 0.75]</div></div>
+    <div class="nchip"><div class="v">0%</div><div class="k">judge flat-rate (vs 57.5% for the rejected model)</div></div>
+    <div class="nchip"><div class="v">55.3%</div><div class="k">Mistral win-rate by true identity</div></div>
+    <div class="nchip"><div class="v">74.5</div><div class="k">verifier discrimination gap /80 (solid vs broken)</div></div>
+    <div class="nchip"><div class="v">32/37</div><div class="k">rows exposing the judge-copying bug</div></div>
+    <div class="nchip"><div class="v">p=0.011</div><div class="k">significance of the threshold finding</div></div>
+  </div>
+</section>
+
+<section id="qa" class="wrap">
+  <div class="section-head">
+    <h2>Anticipated questions &amp; answers</h2>
+    <p>Ordered from most likely to hardest. Each answer leads with the one-line version, then the backup detail if they press.</p>
+  </div>
+  <div class="qa">
+
+    <div class="qcard">
+      <span class="tag">Foundational · very likely</span>
+      <div class="q"><span class="mark">Q1</span>Why should anyone trust an LLM to judge another LLM?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "Because I never assumed it — I tested it." <strong>Backup:</strong> I ran a discrimination test — a deliberately broken answer against a solid one. A judge that can't score the broken one far lower is unusable. My final judge scored solid answers 77–80 out of 80 and broken ones 0–8. I also rejected a judge that had good average scores but gave all eight rubric criteria the identical value on 57.5% of answers — a fluent number with no analysis behind it. Trust came from the test, not the fluency.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Methodology · very likely</span>
+      <div class="q"><span class="mark">Q2</span>You have no ground-truth labels. So how do you validate anything?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "With label-free objectives that are still falsifiable." <strong>Backup:</strong> Two families. First, discrimination — can an evaluator tell bad from good on constructed cases. Second, internal consistency and regeneration validity — do the signals predict each other, and does a low score genuinely predict that a retry improves the answer. Neither needs a correctness label, but both can fail, which is what makes them real tests rather than assumptions.</div>
+      <div class="trap"><b>If they push:</b> concede openly — "This measures self-consistency and corroboration, not verified correctness. Real accuracy would need a human-labelled subset, which is exactly my proposed next step." Owning the limit is stronger than defending past it.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Rigor · likely</span>
+      <div class="q"><span class="mark">Q3</span>How do you know your scores measure quality and not something else?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "I found out they partly didn't — and fixed it." <strong>Backup:</strong> I discovered LLaMA 3 was always shown as 'Answer 1' and the prompts named the brands, so position and identity were confounded with quality across the entire early dataset. I made evaluation blind and randomised answer order per question. Once separated, the raw-position win gap of 35/65 shrank to a true-identity gap of 45/55 — proving most of the apparent gap was an artefact, and quantifying the small part that was real.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Statistics · likely</span>
+      <div class="q"><span class="mark">Q4</span>Why 0.75 for the threshold? Isn't that arbitrary?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "Three independent methods agree on it." <strong>Backup:</strong> The problem was censored data — you only ever see retries below the threshold. I added a control group: a random fraction of already-passing answers get a retry too, purely to measure them. Then a z-test (p=0.011), an ROC/Youden's-J analysis, and a 2,000-sample bootstrap all landed on a 0.69–0.75 optimal range. 0.75 sits inside it, on a broad plateau — not a knife-edge guess.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">The hard one · be ready</span>
+      <div class="q"><span class="mark">Q5</span>Your system says Mistral is better. Is it, really?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "Honestly — I can't fully prove that, and here's exactly why." <strong>Backup:</strong> The judge rates Mistral higher on factual criteria. But the independent verifier sees no difference at all on the same answers — and I proved the verifier isn't just blind, because it discriminates broken answers cleanly. So the balance of evidence says the judge's preference may be a model-specific perception, not a real quality gap. Settling it would need per-answer fact-checking I don't have at scale. I report it as open rather than overclaiming.</div>
+      <div class="trap"><b>Why this is a strength:</b> a panel trusts a candidate who says "the evidence doesn't settle this" far more than one who forces a clean story. This answer demonstrates you understand your own results' limits.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Integrity · impressive if it comes up</span>
+      <div class="q"><span class="mark">Q6</span>Did anything go wrong during the project?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "Yes — three measurement bugs, all caught before they became conclusions." <strong>Backup:</strong> One, a model reported a total that didn't match its own criterion scores — I recompute totals now, never trust the model's arithmetic. Two, a 'second-opinion' signal was secretly derived from the judge itself, so it inflated results — I excluded it from the search. Three, a threshold analysis under-counted part of the data because a sampling rate had changed mid-run — I re-weighted by the rate actually in force. Each was found by a result looking suspiciously clean and being checked, not by luck.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Scope · likely</span>
+      <div class="q"><span class="mark">Q7</span>Isn't this just a data-generation pipeline? Where's the "intelligence"?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "The intelligence is the self-validation, not the generation." <strong>Backup:</strong> Any pipeline can produce answers. The contribution is a system that decides how much to trust its own output, corroborates it, and retries when unsure — and a demonstrated method for proving each of those decisions is sound without a labelled dataset. The 5,000-question corpus is the evidence that the method works at scale, and the raw material for a follow-on confidence-predictor model.</div>
+    </div>
+
+    <div class="qcard">
+      <span class="tag">Generalisation · possible</span>
+      <div class="q"><span class="mark">Q8</span>Would this work with different models, or in a different domain?</div>
+      <div class="a"><span class="lead-in">Lead:</span> "The method transfers; the specific numbers wouldn't." <strong>Backup:</strong> The protocol — blind evaluation, discrimination testing, control-group calibration — is model- and domain-agnostic. What's specific to my setup is the tuned values: the exact threshold, the weights, which judge won. On a new model set you'd re-run the same experiments and get new values. I haven't tested that transfer, and I'd state it as a limitation rather than claim it.</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="closers" class="wrap">
+  <div class="section-head">
+    <h2>Delivery notes</h2>
+    <p>Small things that change how the room reads you.</p>
+  </div>
+  <ul class="clean">
+    <li><b>Lead with the honest limits before they ask.</b> Naming what your evidence doesn't cover — accuracy, the Mistral question, generalisation — makes every claim you <i>do</i> make more credible.</li>
+    <li><b>Turn the bugs into the highlight.</b> The three self-caught errors are your strongest material; a project with zero visible mistakes reads as one that didn't look hard enough.</li>
+    <li><b>Quote a number, don't reach for notes.</b> "57.5% versus 0% flat-rate," "p equals 0.011," "gap of 74.5 out of 80" — specifics signal command of your own work.</li>
+    <li><b>If you don't know, say what you'd do to find out.</b> "I haven't tested that — the way I'd check it is…" is a complete, confident answer.</li>
+    <li><b>Have the repo and the live demo ready.</b> Being able to show the pipeline running, or open the dataset viewer, converts a claim into a demonstration.</li>
+  </ul>
+</section>
+
+<footer class="wrap">
+  Defense preparation · companion to the project technical report · Agentic Multi-LLM Validation System
+</footer>

@@ -1393,4 +1393,52 @@ verifier_judge_agreement circularity, Section 24's initial case-control
 miscount, this one), each corrected before being reported as fact rather
 than after - the pattern this whole project has run on since Section 8.
 
+## 35. Deliverables built: technical report, defense prep, and a blind ground-truth study
+
+With data collection complete (Section 33), turned the raw work into
+consumable deliverables and set up the one thing the project lacked by
+necessity - a real ground-truth anchor.
+
+**Technical report** (`docs/project-report.html`): a structured writeup of
+the whole project - problem statement, six-stage architecture, the
+label-free methodology, five key findings (judge selection, the anchoring
+bug, position/identity bias, the threshold proof, the open Mistral
+question), limitations stated plainly, contributions, and future work.
+Distilled from this 35-section log into something a reader/panel consumes
+top to bottom.
+
+**Defense prep** (`docs/defense-prep.html`): a 60-second opening pitch, a
+six-step spoken walkthrough, the numbers worth memorising, and tested
+answers to eight anticipated questions ordered from foundational to
+hardest - including how to handle the Mistral question honestly and how to
+turn the three self-caught measurement bugs into the strongest material
+rather than hiding them.
+
+**Ground-truth study** (`ground_truth_study/`): the scope decision
+(Section 34's future-work fork) was resolved by the user in favour of a
+small human study to settle the Mistral question. Built the harness for a
+methodologically sound version rather than having an LLM fake the ground
+truth (which would reintroduce the exact circularity the project fights):
+- `build_study.py` samples a BALANCED set (equal Judge-picked-Mistral and
+  Judge-picked-LLaMA3 pairs, 15+15=30 by default) from the 4,909 eligible
+  final rows where the Judge expressed a real preference, BLINDS it (no
+  model names, no Judge verdict in the sheet; answer order independently
+  re-randomized), and writes the identity/verdict mapping to a separate
+  `answer_key.json` the rater never opens. Blinding verified: zero
+  model-identity strings in the rating sheet.
+- Humans (the user + lab peers as additional raters) fill
+  `rating_sheet.csv` - which answer is more factually correct, plus any
+  outright errors - fully blind.
+- `analyze_ratings.py` joins verdicts back to the key and runs an exact
+  two-sided binomial test on whether humans side with Mistral, with
+  LLaMA3, or at chance - directly adjudicating the Judge-vs-Verifier
+  disagreement from Sections 29-31. The three outcomes and their
+  interpretations are pre-registered in the script so the conclusion can't
+  be rationalized after seeing the result.
+
+This is the honest closing state: the pipeline and dataset are a complete,
+defensible FYP on their own; the ground-truth study is the one piece of
+real accuracy that would let the project make a verified (not just
+self-consistent) claim, and its harness is ready for human raters.
+
 *(Log continues below as further tests complete.)*

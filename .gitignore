@@ -26,3 +26,6 @@ heartbeat_task.xml
 # WAL/SHM sidecar files (SQLite journal state, not meaningful without the main .db)
 *.db-wal
 *.db-shm
+
+# Ground-truth study: keep the harness, exclude Python cache
+ground_truth_study/__pycache__/
