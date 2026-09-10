@@ -29,3 +29,7 @@ heartbeat_task.xml
 
 # Ground-truth study: keep the harness, exclude Python cache
 ground_truth_study/__pycache__/
+
+# PDF build intermediates (keep the script + final PDFs, not the _print.html copies)
+pdf_build/*_print.html
+pdf_build/__pycache__/
