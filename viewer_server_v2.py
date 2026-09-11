@@ -97,6 +97,40 @@ def get_recent(limit=30):
     )
 
 
+def get_browse(limit=50, offset=0, q="", order="idx_asc"):
+    """Paginated + searchable view of ALL final rows, so the entire 5000
+    -question dataset can be browsed, not just the most recent handful.
+    Returns {rows, total} where total reflects the (optionally filtered) set."""
+    where = "WHERE is_final_attempt=1"
+    params = []
+    if q:
+        where += " AND question LIKE ?"
+        params.append(f"%{q}%")
+
+    total = query_db(f"SELECT COUNT(*) AS c FROM pipeline_runs {where}", tuple(params))[0]["c"]
+
+    order_sql = {
+        "idx_asc": "question_idx ASC",
+        "idx_desc": "question_idx DESC",
+        "score_desc": "weighted_score DESC",
+        "score_asc": "weighted_score ASC",
+        "recent": "id DESC",
+    }.get(order, "question_idx ASC")
+
+    rows = query_db(
+        f"""SELECT id, question_idx, question, attempt_number, winner, weighted_score,
+                   model_a, model_b, judge_total_a, judge_total_b,
+                   verifier_judge_agreement, wikipedia_score, wikidata_score,
+                   elapsed_secs, created_at,
+                   (SELECT COUNT(*) FROM pipeline_runs p2 WHERE p2.question_idx = pipeline_runs.question_idx) AS total_attempts
+            FROM pipeline_runs {where}
+            ORDER BY {order_sql}
+            LIMIT ? OFFSET ?""",
+        tuple(params) + (limit, offset),
+    )
+    return {"rows": rows, "total": total, "limit": limit, "offset": offset}
+
+
 def get_sibling_attempts(question_idx, exclude_id):
     """Every other attempt logged for the same question - so the detail
     modal can show what was tried and discarded, not just the kept one."""
@@ -162,6 +196,15 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(qs.get("limit", ["30"])[0])
             try:
                 self.send_json({"rows": get_recent(limit)})
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, status=500)
+        elif parsed.path == "/api/browse":
+            try:
+                limit = max(1, min(200, int(qs.get("limit", ["50"])[0])))
+                offset = max(0, int(qs.get("offset", ["0"])[0]))
+                q = qs.get("q", [""])[0]
+                order = qs.get("order", ["idx_asc"])[0]
+                self.send_json(get_browse(limit, offset, q, order))
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=500)
         elif parsed.path == "/api/detail":

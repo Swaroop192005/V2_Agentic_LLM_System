@@ -104,6 +104,16 @@
   .raw-block { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 0.76rem; color: var(--text-dim); white-space: pre-wrap; max-height: 260px; overflow-y: auto; line-height: 1.5; }
   details.raw-details summary { cursor: pointer; font-size: 0.78rem; color: var(--text-faint); font-weight: 700; margin-bottom: 8px; }
   details.raw-details summary:hover { color: var(--text); }
+  .browse-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .browse-controls input, .browse-controls select { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; font-family: inherit; }
+  .browse-controls input { flex: 1; min-width: 180px; }
+  .browse-controls input:focus, .browse-controls select:focus { outline: 2px solid var(--accent, #6E97D6); outline-offset: 1px; }
+  .browse-count { font-size: 0.8rem; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 16px 0 4px; }
+  .pager button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text-dim); border-radius: 8px; padding: 8px 16px; font-size: 0.85rem; cursor: pointer; font-family: inherit; transition: all .15s; }
+  .pager button:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
+  .pager button:disabled { opacity: 0.4; cursor: default; }
+  .page-info { font-size: 0.82rem; color: var(--text-faint); font-variant-numeric: tabular-nums; min-width: 150px; text-align: center; }
 </style>
 </head>
 <body>
@@ -139,6 +149,28 @@
     <thead><tr><th>Question</th><th>Attempt</th><th>Winner</th><th>Score</th><th>Judge A/B</th><th>Time</th></tr></thead>
     <tbody id="recent-body"><tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">Loading…</td></tr></tbody>
   </table>
+
+  <div class="section-title" style="margin-top:38px;">Browse the entire dataset</div>
+  <div class="browse-controls">
+    <input type="text" id="browse-search" placeholder="Search questions…" autocomplete="off" />
+    <select id="browse-order">
+      <option value="idx_asc">Question # ↑</option>
+      <option value="idx_desc">Question # ↓</option>
+      <option value="score_desc">Score ↓</option>
+      <option value="score_asc">Score ↑</option>
+      <option value="recent">Most recent</option>
+    </select>
+    <span class="browse-count" id="browse-count">–</span>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Question</th><th>Attempt</th><th>Winner</th><th>Score</th><th>Judge A/B</th></tr></thead>
+    <tbody id="browse-body"><tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">Loading…</td></tr></tbody>
+  </table>
+  <div class="pager">
+    <button id="page-prev">‹ Prev</button>
+    <span id="page-info" class="page-info">–</span>
+    <button id="page-next">Next ›</button>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modal-overlay">
@@ -241,6 +273,72 @@ async function poll() {
     document.getElementById('status-text').textContent = 'Connection error — is viewer_server_v2.py running?';
   }
 }
+
+// ── Browse the entire dataset (paginated + searchable) ───────────────────
+const PAGE_SIZE = 50;
+let browseState = { offset: 0, total: 0, q: '', order: 'idx_asc' };
+
+function browseRowHtml(r) {
+  const trueWinnerModel = r.winner === 'A' ? r.model_a : r.model_b;
+  const winClass = trueWinnerModel === 'mistral' ? 'win-mistral' : 'win-llama3';
+  const winName = trueWinnerModel === 'mistral' ? 'Mistral' : 'LLaMA 3';
+  const scoreClass = (r.weighted_score ?? 0) >= 0.75 ? 'score-ok' : 'score-low';
+  const attemptClass = r.attempt_number > 1 ? 'attempt-badge regen' : 'attempt-badge';
+  const attemptLabel = r.total_attempts > 1 ? `${r.attempt_number}/${r.total_attempts}` : `#${r.attempt_number}`;
+  return `<tr class="row-clickable" data-id="${r.id}">
+    <td style="color:var(--text-faint);font-variant-numeric:tabular-nums;">${r.question_idx}</td>
+    <td class="q-cell" title="${esc(r.question)}">${esc(r.question)}</td>
+    <td><span class="${attemptClass}">${attemptLabel}</span></td>
+    <td class="${winClass}">${winName}</td>
+    <td class="${scoreClass}">${r.weighted_score !== null ? (r.weighted_score*100).toFixed(1)+'%' : '–'}</td>
+    <td>${r.judge_total_a}/${r.judge_total_b}</td>
+  </tr>`;
+}
+
+async function loadBrowse() {
+  const body = document.getElementById('browse-body');
+  try {
+    const url = `/api/browse?limit=${PAGE_SIZE}&offset=${browseState.offset}`
+      + `&q=${encodeURIComponent(browseState.q)}&order=${browseState.order}`;
+    const d = await fetch(url).then(r => r.json());
+    if (d.error) throw new Error(d.error);
+    browseState.total = d.total;
+    const rows = d.rows || [];
+    body.innerHTML = rows.length
+      ? rows.map(browseRowHtml).join('')
+      : '<tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;">No matching questions.</td></tr>';
+
+    const from = d.total === 0 ? 0 : browseState.offset + 1;
+    const to = Math.min(browseState.offset + PAGE_SIZE, d.total);
+    document.getElementById('browse-count').textContent = `${d.total.toLocaleString()} question${d.total===1?'':'s'}${browseState.q ? ' matched' : ''}`;
+    document.getElementById('page-info').textContent = `${from.toLocaleString()}–${to.toLocaleString()} of ${d.total.toLocaleString()}`;
+    document.getElementById('page-prev').disabled = browseState.offset <= 0;
+    document.getElementById('page-next').disabled = to >= d.total;
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:24px;">Failed to load: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+let searchTimer = null;
+document.getElementById('browse-search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { browseState.q = e.target.value.trim(); browseState.offset = 0; loadBrowse(); }, 250);
+});
+document.getElementById('browse-order').addEventListener('change', (e) => {
+  browseState.order = e.target.value; browseState.offset = 0; loadBrowse();
+});
+document.getElementById('page-prev').addEventListener('click', () => {
+  browseState.offset = Math.max(0, browseState.offset - PAGE_SIZE); loadBrowse();
+  document.getElementById('browse-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.getElementById('page-next').addEventListener('click', () => {
+  if (browseState.offset + PAGE_SIZE < browseState.total) { browseState.offset += PAGE_SIZE; loadBrowse(); }
+  document.getElementById('browse-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+document.getElementById('browse-body').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (tr) openDetail(tr.getAttribute('data-id'));
+});
 
 const FACTORS = [
   ['factual_correctness', 'Factual Correctness'],
@@ -379,6 +477,7 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 
 poll();
 setInterval(poll, 5000);
+loadBrowse();
 </script>
 </body>
 </html>
