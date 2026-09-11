@@ -246,6 +246,10 @@ textarea#query-input::placeholder { color: var(--text-faint); }
 .stream-card.llama { --edge: var(--llama); }
 .stream-card.mistral { --edge: var(--mistral); }
 .stream-card.score { --edge: var(--score); }
+.stream-card.conf-pass { --edge: var(--green); }
+.stream-card.conf-fail { --edge: var(--red); }
+.conf-verdict { font-size: 0.95rem; font-weight: 700; margin-bottom: 8px; }
+.conf-chips-inline { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 
 .stream-card.final {
   border-left: none; border-image: linear-gradient(180deg, var(--cyan), var(--magenta)) 1;

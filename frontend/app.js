@@ -347,6 +347,31 @@ function updateConfidence(p) {
     chip('Wikidata', p.wikidata) + sourceChip('Wikidata', p.wikidata_source);
 }
 
+// Persistent per-attempt confidence record appended to the stream, so every
+// attempt's score-vs-threshold stays visible (the gauge card above only ever
+// shows the latest attempt, overwriting the failed ones that triggered a retry).
+function appendConfidenceLine(p) {
+  const pct = Math.round(p.weighted_score * 100);
+  const thresholdPct = Math.round(p.threshold * 100);
+  const passed = p.weighted_score >= p.threshold;
+  const winnerName = p.winner === 'A' ? 'LLaMA 3' : 'Mistral';
+  const verdict = passed
+    ? `<span style="color:var(--green)">${pct}%</span> &mdash; at/above the ${thresholdPct}% threshold &nbsp;✓ accepted`
+    : `<span style="color:var(--red)">${pct}%</span> &mdash; below the ${thresholdPct}% threshold &nbsp;⚠ regenerating`;
+  const chip = (label, val) => `<span class="chip">${label}: <b>${val === null || val === undefined ? 'n/a' : Math.round(val * 100) + '%'}</b></span>`;
+  const chips =
+    chip('Judge', p.judge) + chip('Similarity', p.similarity) + chip('Model agr.', p.agreement) +
+    chip('Verif↔Judge', p.verifier_judge_agreement) + chip('Wikipedia', p.wikipedia) + chip('Wikidata', p.wikidata);
+  const body = `<div class="conf-verdict">${verdict}</div>`
+    + `<div>Winner: <strong>${winnerName}</strong> &middot; weighted blend of all six signals:</div>`
+    + `<div class="conf-chips-inline">${chips}</div>`;
+  const card = cardShell(`conf-attempt-${p.attempt}`, passed ? 'conf-pass' : 'conf-fail',
+    passed ? '✓' : '⚠', `Confidence score — Attempt ${p.attempt}`,
+    passed ? 'Passed threshold' : 'Below threshold', body);
+  stream.appendChild(card);
+  scrollTo(card);
+}
+
 function showRegenerating(p) {
   regenBanner.classList.add('visible');
   const thresholdPct = Math.round(p.threshold * 100);
@@ -486,7 +511,8 @@ function handleEvent(p) {
   // Confidence score for the winning answer this attempt
   if (p.weighted_score !== undefined) {
     hideRegenerating();
-    updateConfidence(p);
+    updateConfidence(p);          // updates the summary gauge (latest attempt)
+    appendConfidenceLine(p);      // permanent per-attempt record in the stream
     return;
   }
 
